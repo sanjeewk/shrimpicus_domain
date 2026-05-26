@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+
+# Python build artifacts
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+CLAUDE.md
