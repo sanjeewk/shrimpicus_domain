@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SHRIMPICUS // QUEST LOG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <main class="cabinet">
+    <header class="marquee">
+      <div class="spinners" aria-hidden="true">
+        <span class="spinner spinner--coin">
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges">
+            <rect x="5" y="2" width="6" height="1" fill="#ffd23f"/>
+            <rect x="3" y="3" width="10" height="1" fill="#ffd23f"/>
+            <rect x="2" y="4" width="12" height="8" fill="#ffd23f"/>
+            <rect x="3" y="12" width="10" height="1" fill="#ffd23f"/>
+            <rect x="5" y="13" width="6" height="1" fill="#ffd23f"/>
+            <rect x="7" y="5" width="2" height="6" fill="#b8860b"/>
+            <rect x="6" y="6" width="1" height="4" fill="#b8860b"/>
+            <rect x="9" y="6" width="1" height="4" fill="#b8860b"/>
+          </svg>
+        </span>
+        <span class="spinner spinner--floppy">
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges">
+            <rect x="1" y="1" width="14" height="14" fill="#00f0a8"/>
+            <rect x="3" y="2" width="10" height="5" fill="#0a0a14"/>
+            <rect x="9" y="3" width="2" height="3" fill="#00f0a8"/>
+            <rect x="3" y="9" width="10" height="5" fill="#062b1f"/>
+            <rect x="5" y="10" width="6" height="1" fill="#00f0a8"/>
+            <rect x="5" y="12" width="6" height="1" fill="#00f0a8"/>
+          </svg>
+        </span>
+        <span class="spinner spinner--star">
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges">
+            <rect x="7" y="1" width="2" height="2" fill="#ff2e63"/>
+            <rect x="6" y="3" width="4" height="2" fill="#ff2e63"/>
+            <rect x="1" y="5" width="14" height="2" fill="#ff2e63"/>
+            <rect x="3" y="7" width="10" height="2" fill="#ff2e63"/>
+            <rect x="4" y="9" width="8" height="2" fill="#ff2e63"/>
+            <rect x="3" y="11" width="3" height="3" fill="#ff2e63"/>
+            <rect x="10" y="11" width="3" height="3" fill="#ff2e63"/>
+          </svg>
+        </span>
+      </div>
+      <h1 class="title">
+        <span class="title__sub">★ PRESS START ★</span>
+        <span class="title__main">SHRIMPICUS</span>
+        <span class="title__tag">QUEST LOG v1.0</span>
+      </h1>
+      <div class="scoreboard">
+        <div class="scoreboard__row"><span>SCORE</span><b>{{ "%08d"|format(stats.score) }}</b></div>
+        <div class="scoreboard__row"><span>LVL</span><b>{{ "%02d"|format(stats.level) }}</b></div>
+      </div>
+    </header>
+
+    <section class="hud">
+      <div class="hud__panel">
+        <div class="hud__label">XP / COMPLETION</div>
+        <div class="hpbar" role="progressbar" aria-valuenow="{{ stats.xp }}" aria-valuemin="0" aria-valuemax="100">
+          <div class="hpbar__fill" style="width: {{ stats.xp }}%"></div>
+          <div class="hpbar__text">{{ stats.done }} / {{ stats.total }}  ({{ stats.xp }}%)</div>
+        </div>
+      </div>
+      <div class="hud__panel hud__panel--stats">
+        <div class="stat"><span>QUESTS</span><b>{{ "%03d"|format(stats.pending) }}</b></div>
+        <div class="stat stat--done"><span>SLAIN</span><b>{{ "%03d"|format(stats.done) }}</b></div>
+      </div>
+      <form class="hud__panel hud__panel--filters" method="get" action="/">
+        <label class="hud__label" for="chat">SELECT WORLD</label>
+        <select id="chat" name="chat" onchange="this.form.submit()">
+          <option value="">— ALL WORLDS —</option>
+          {% for c in chats %}
+          <option value="{{ c.id }}" {% if selected_chat == c.id %}selected{% endif %}>
+            WORLD {{ c.id }} · {{ c.n }} ENTRIES
+          </option>
+          {% endfor %}
+        </select>
+        <label class="toggle">
+          <input type="checkbox" name="done" value="1" onchange="this.form.submit()" {% if show_done %}checked{% endif %}>
+          <span>SHOW DEFEATED</span>
+        </label>
+      </form>
+    </section>
+
+    <section class="quests">
+      <div class="quests__heading">
+        <span class="quests__bullet">▶</span>
+        <h2>ACTIVE QUEST LOG</h2>
+        <span class="quests__count">{{ todos|length }} ENTRIES</span>
+      </div>
+
+      {% if todos %}
+      <ul class="quest-list">
+        {% for t in todos %}
+        <li class="quest {% if t.done %}quest--done{% endif %}">
+          <div class="quest__id">#{{ "%04d"|format(t.id) }}</div>
+          <div class="quest__icon" aria-hidden="true">
+            {% if t.done %}
+            <svg viewBox="0 0 12 12" shape-rendering="crispEdges">
+              <rect x="1" y="5" width="2" height="2" fill="#7cff5a"/>
+              <rect x="3" y="7" width="2" height="2" fill="#7cff5a"/>
+              <rect x="5" y="5" width="2" height="2" fill="#7cff5a"/>
+              <rect x="7" y="3" width="2" height="2" fill="#7cff5a"/>
+              <rect x="9" y="1" width="2" height="2" fill="#7cff5a"/>
+            </svg>
+            {% else %}
+            <svg viewBox="0 0 12 12" shape-rendering="crispEdges" class="quest__icon-spin">
+              <rect x="5" y="1" width="2" height="2" fill="#ffd23f"/>
+              <rect x="5" y="9" width="2" height="2" fill="#ffd23f"/>
+              <rect x="1" y="5" width="2" height="2" fill="#ffd23f"/>
+              <rect x="9" y="5" width="2" height="2" fill="#ffd23f"/>
+              <rect x="3" y="3" width="2" height="2" fill="#ffd23f"/>
+              <rect x="7" y="3" width="2" height="2" fill="#ffd23f"/>
+              <rect x="3" y="7" width="2" height="2" fill="#ffd23f"/>
+              <rect x="7" y="7" width="2" height="2" fill="#ffd23f"/>
+            </svg>
+            {% endif %}
+          </div>
+          <div class="quest__body">
+            <div class="quest__task">{{ t.task }}</div>
+            <div class="quest__meta">
+              <span class="tag tag--world">WORLD {{ t.chat_id }}</span>
+              <span class="tag tag--time">{{ t.created_human }}</span>
+              {% if t.linked_notion %}<span class="tag tag--notion">NOTION LINK</span>{% endif %}
+              {% if t.done %}<span class="tag tag--cleared">CLEARED</span>{% endif %}
+            </div>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty">
+        <div class="empty__art">
+          <pre>
+   ╔════════════════╗
+   ║   NO QUESTS    ║
+   ║   IN THIS      ║
+   ║    REALM       ║
+   ╚════════════════╝
+          </pre>
+        </div>
+        <p>ADD A TODO IN DISCORD TO POPULATE THE LOG.</p>
+      </div>
+      {% endif %}
+    </section>
+
+    <footer class="footer">
+      <span>© SHRIMPICUS DEV TEAM</span>
+      <span class="blink">█ INSERT COIN █</span>
+      <span>1P READY</span>
+    </footer>
+  </main>
+</body>
+</html>
