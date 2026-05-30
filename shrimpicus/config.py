@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:7b-instruct-q4_K_M"
 
+    whisper_enabled: bool = True
+    whisper_model: str = "base"
+
     tz: str = "UTC"
     db_path: str = "./data/shrimpicus.db"
     check_interval_seconds: int = 30

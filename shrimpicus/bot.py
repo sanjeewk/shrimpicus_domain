@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from discord.ext import commands
 import discord
 
 from shrimpicus.assistant import AssistantService
+from shrimpicus.transcribe import Transcriber
+
+logger = logging.getLogger(__name__)
+
+_AUDIO_EXTS = {".ogg", ".oga", ".mp3", ".wav", ".m4a", ".webm", ".flac"}
 
 
 def build_bot(
     command_prefix: str,
     assistant: AssistantService,
+    transcriber: Transcriber | None = None,
 ) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
@@ -139,6 +148,27 @@ def build_bot(
         reply = await assistant.free_text(ctx.channel.id, question)
         await ctx.send(reply)
 
+    async def _maybe_transcribe(message: discord.Message) -> str | None:
+        if transcriber is None or not transcriber.enabled:
+            return None
+        for att in message.attachments:
+            suffix = Path(att.filename or "").suffix.lower()
+            if suffix not in _AUDIO_EXTS:
+                continue
+            try:
+                audio = await att.read()
+            except Exception:
+                logger.exception("Failed to download attachment %s", att.filename)
+                continue
+            try:
+                text = await transcriber.transcribe_bytes(audio, suffix=suffix or ".ogg")
+            except Exception:
+                logger.exception("Transcription failed for %s", att.filename)
+                continue
+            if text:
+                return text
+        return None
+
     @bot.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
@@ -148,7 +178,15 @@ def build_bot(
             return
         if message.guild and bot.user and bot.user not in message.mentions:
             return
-        reply = await assistant.free_text(message.channel.id, message.content)
+
+        transcript = await _maybe_transcribe(message)
+        text = (transcript or message.content or "").strip()
+        if not text:
+            return
+
+        if transcript:
+            await message.channel.send(f"(transcribed) {transcript}")
+        reply = await assistant.free_text(message.channel.id, text)
         await message.channel.send(reply)
 
     return bot

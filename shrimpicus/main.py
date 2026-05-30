@@ -14,6 +14,7 @@ from shrimpicus.notion import NotionService
 from shrimpicus.obsidian import ObsidianJournal
 from shrimpicus.ollama import OllamaClient
 from shrimpicus.scheduler import ShrimpScheduler
+from shrimpicus.transcribe import Transcriber
 
 
 async def run() -> None:
@@ -45,7 +46,12 @@ async def run() -> None:
     journal = ObsidianJournal(settings.obsidian_journal_file)
     ollama = OllamaClient(settings)
     assistant = AssistantService(settings, db, notion, journal, ollama)
-    bot = build_bot(settings.discord_command_prefix, assistant)
+    transcriber = Transcriber(settings.whisper_enabled, settings.whisper_model)
+    bot = build_bot(
+        settings.discord_command_prefix,
+        assistant,
+        transcriber=transcriber,
+    )
     scheduler = ShrimpScheduler(settings, db, bot)
     bot.shrimp_scheduler = scheduler  # type: ignore[attr-defined]
     try:

@@ -12,6 +12,11 @@ dependencies = [
   "python-dateutil>=2.9.0",
 ]
 
+[project.optional-dependencies]
+voice = [
+  "faster-whisper>=1.0.3",
+]
+
 [project.scripts]
 shrimpicus = "shrimpicus.main:main"
 
