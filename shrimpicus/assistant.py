@@ -12,6 +12,42 @@ from shrimpicus.obsidian import ObsidianJournal
 from shrimpicus.ollama import OllamaClient
 
 
+TODO_CATEGORIES = ("Job", "Home", "Finance", "General")
+
+_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "Job": (
+        "work", "job", "office", "boss", "client", "meeting", "standup",
+        "deadline", "report", "deck", "slides", "email", "interview",
+        "resume", "cv", "linkedin", "project", "ticket", "jira", "pr",
+        "code review", "deploy", "release", "presentation",
+    ),
+    "Home": (
+        "home", "house", "kitchen", "laundry", "clean", "vacuum", "dishes",
+        "groceries", "grocery", "fridge", "cook", "dinner", "lunch",
+        "trash", "garbage", "repair", "fix", "plumber", "garden", "lawn",
+        "vacation", "pack", "room",
+    ),
+    "Finance": (
+        "pay", "bill", "rent", "mortgage", "loan", "invoice", "tax",
+        "taxes", "bank", "credit", "card", "budget", "subscription",
+        "insurance", "transfer", "deposit", "salary", "invest", "stock",
+        "crypto", "expense", "refund",
+    ),
+}
+
+
+def classify_todo(task: str) -> str:
+    text = task.lower()
+    scores: dict[str, int] = {}
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        hits = sum(1 for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", text))
+        if hits:
+            scores[category] = hits
+    if not scores:
+        return "General"
+    return max(scores.items(), key=lambda kv: kv[1])[0]
+
+
 class AssistantService:
     def __init__(
         self,
@@ -40,8 +76,9 @@ class AssistantService:
             lines.append(f"#{r.id} [{r.status}] {r.due_at} - {r.content}")
         return "\n".join(lines)
 
-    async def add_todo(self, chat_id: int, task: str) -> str:
+    async def add_todo(self, chat_id: int, task: str, category: str | None = None) -> str:
         task = task.strip()
+        category = category if category in TODO_CATEGORIES else classify_todo(task)
         notion_page_id = None
         if self.notion.enabled:
             try:
@@ -54,16 +91,27 @@ class AssistantService:
         else:
             err = ""
 
-        todo_id = self.db.add_todo(chat_id, task, notion_page_id=notion_page_id)
+        todo_id = self.db.add_todo(chat_id, task, category=category, notion_page_id=notion_page_id)
         if notion_page_id:
-            return f"Todo #{todo_id} added and synced to Notion. {err}".strip()
-        return f"Todo #{todo_id} added. {err}".strip()
+            return f"Todo #{todo_id} [{category}] added and synced to Notion. {err}".strip()
+        return f"Todo #{todo_id} [{category}] added. {err}".strip()
 
     def list_todos_text(self, chat_id: int) -> str:
         rows = self.db.list_todos(chat_id, include_done=False)
         if not rows:
             return "No open todos."
-        return "\n".join([f"#{row['id']} [ ] {row['task']}" for row in rows])
+        grouped: dict[str, list[str]] = {c: [] for c in TODO_CATEGORIES}
+        for row in rows:
+            cat = row["category"] if "category" in row.keys() else "General"
+            if cat not in grouped:
+                grouped[cat] = []
+            grouped[cat].append(f"#{row['id']} [ ] {row['task']}")
+        lines: list[str] = []
+        for cat in TODO_CATEGORIES:
+            if grouped.get(cat):
+                lines.append(f"**{cat}**")
+                lines.extend(grouped[cat])
+        return "\n".join(lines)
 
     def mark_todo_done(self, todo_id: int) -> str:
         self.db.set_todo_done(todo_id, True)
@@ -101,6 +149,7 @@ class AssistantService:
 
     async def _try_rule_based(self, chat_id: int, text: str) -> str | None:
         t = text.strip()
+        lower = t.lower()
 
         match = re.search(r"remind me to (.+) in (\d+)\s*(minute|minutes|min|hour|hours|day|days)", t, re.I)
         if match:
@@ -114,12 +163,21 @@ class AssistantService:
             rid = self.add_reminder_minutes(chat_id, n, content, poll_required=True)
             return f"Reminder #{rid} added."
 
-        if t.lower().startswith("add todo "):
+        if lower == "tdl" or lower.startswith("tdl "):
+            return self.list_todos_text(chat_id)
+
+        match = re.match(r"td\s+(.+)$", t, re.I)
+        if match:
+            task = match.group(1).strip()
+            if task:
+                return await self.add_todo(chat_id, task)
+
+        if lower.startswith("add todo "):
             task = t[9:].strip()
             if task:
                 return await self.add_todo(chat_id, task)
 
-        if t.lower().startswith("journal "):
+        if lower.startswith("journal "):
             content = t[8:].strip()
             if content:
                 return self.journal(chat_id, content)

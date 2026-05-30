@@ -51,6 +51,7 @@ class Database:
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               chat_id INTEGER NOT NULL,
               task TEXT NOT NULL,
+              category TEXT NOT NULL DEFAULT 'General',
               done INTEGER NOT NULL DEFAULT 0,
               notion_page_id TEXT,
               created_at TEXT NOT NULL
@@ -78,7 +79,15 @@ class Database:
             );
             """
         )
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(todos)").fetchall()}
+        if "category" not in cols:
+            self.conn.execute(
+                "ALTER TABLE todos ADD COLUMN category TEXT NOT NULL DEFAULT 'General'"
+            )
 
     def add_reminder(self, chat_id: int, content: str, due_at_iso: str, poll_required: bool = True) -> int:
         cur = self.conn.execute(
@@ -170,13 +179,13 @@ class Database:
         )
         self.conn.commit()
 
-    def add_todo(self, chat_id: int, task: str, notion_page_id: str | None = None) -> int:
+    def add_todo(self, chat_id: int, task: str, category: str = "General", notion_page_id: str | None = None) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO todos(chat_id, task, done, notion_page_id, created_at)
-            VALUES (?, ?, 0, ?, ?)
+            INSERT INTO todos(chat_id, task, category, done, notion_page_id, created_at)
+            VALUES (?, ?, ?, 0, ?, ?)
             """,
-            (chat_id, task, notion_page_id, utc_now_iso()),
+            (chat_id, task, category, notion_page_id, utc_now_iso()),
         )
         self.conn.commit()
         return int(cur.lastrowid)
