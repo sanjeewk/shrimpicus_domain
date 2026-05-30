@@ -50,6 +50,7 @@ async def run() -> None:
     bot = build_bot(
         settings.discord_command_prefix,
         assistant,
+        assistant_channels=settings.assistant_channels,
         transcriber=transcriber,
     )
     scheduler = ShrimpScheduler(settings, db, bot)

@@ -17,8 +17,11 @@ _AUDIO_EXTS = {".ogg", ".oga", ".mp3", ".wav", ".m4a", ".webm", ".flac"}
 def build_bot(
     command_prefix: str,
     assistant: AssistantService,
+    assistant_channels: list[str] | None = None,
     transcriber: Transcriber | None = None,
 ) -> commands.Bot:
+    assistant_channel_names = {c.lower() for c in (assistant_channels or [])}
+
     intents = discord.Intents.default()
     intents.message_content = True
     intents.guilds = True
@@ -176,7 +179,13 @@ def build_bot(
         await bot.process_commands(message)
         if message.content.startswith(command_prefix):
             return
-        if message.guild and bot.user and bot.user not in message.mentions:
+
+        channel_name = (getattr(message.channel, "name", "") or "").lower()
+        in_assistant_channel = channel_name in assistant_channel_names
+        mentioned = bool(bot.user and bot.user in message.mentions)
+        is_dm = message.guild is None
+
+        if not (is_dm or mentioned or in_assistant_channel):
             return
 
         transcript = await _maybe_transcribe(message)
