@@ -57,4 +57,13 @@ shrimpicus
 - Discord sends Yes/No button check-ins for due reminders.
 - If a reminder receives "No", it is snoozed by `DEFAULT_SNOOZE_MINUTES`.
 - Notion integration is optional and only active when token/database env vars are set.
+
+## Changelog
+
+### Unreleased
+
+- **Retro pixel-art web viewer** — `shrimpicus-web` launches a Flask app that reads the existing SQLite DB and renders a single-page Quest Log of todos. Stats panel with XP/HP completion bar, per-chat ("SELECT WORLD") filter, SHOW DEFEATED toggle. Theme synthesizes arcade-cabinet neon (cyan/lime/hot pink/gold), JRPG quest-log framing, and Game-Boy/CRT chrome (scanlines, vignette, boot-flicker, chunky pixel borders). Header has three pixel-SVG spinners (coin, floppy, star).
+- **Todo categories with auto-classification** — todos are now grouped into Job / Home / Finance / General by keyword scoring of the task text. New `category` column on the todos table (idempotent ALTER TABLE migration). Two free-text shortcuts: `td <task>` to add and `tdl` to list (grouped by category).
+- **Assistant channels and DM routing** — the bot now replies to free-text in any of: a DM, a message that mentions it, or a message in a channel listed in `ASSISTANT_CHANNELS` (comma-separated, default `general`). Previously required an @-mention everywhere.
+- **Voice transcription** — audio attachments (`.ogg`/`.mp3`/`.wav`/`.m4a`/`.webm`/`.flac`) on free-text messages are downloaded, transcribed via faster-whisper on a worker thread, echoed back to the channel, and fed to the assistant. Optional install: `pip install -e .[voice]`. Configured via `WHISPER_ENABLED` / `WHISPER_MODEL`.
 # shrimpicus_domain
