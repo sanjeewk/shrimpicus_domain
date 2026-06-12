@@ -25,6 +25,7 @@
   {% for status, label in [('to_do', 'To do'), ('doing', 'Doing'), ('done', 'Done')] %}
   <div class="column column--{{ status }}">
     <div class="column__header">
+      <span class="column__dot" aria-hidden="true"></span>
       <span class="column__title">{{ label }}</span>
       <span class="column__count">{{ columns[status]|length }}</span>
     </div>
