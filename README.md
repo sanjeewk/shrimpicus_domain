@@ -100,6 +100,10 @@ The server uses `MCP_CHAT_ID` from `.env` (defaults to `0`) to scope all operati
 
 ### Unreleased
 
+- **RAG + tool calling** — the assistant now injects a context snapshot (todos, reminders, habits, completion count) into every free-text conversation and can directly add, complete, or modify your data via an agentic tool-calling loop. Natural commands like "add buy milk and mark todo 3 done" just work.
+- **MCP server** — `shrimpicus-mcp` exposes the same tool registry over stdio so Claude Desktop (or any MCP client) can manage your todos/reminders/habits. Install with `pip install -e '.[mcp]'`.
+- **Habit tracking** — log daily habits via Discord (`log_habit` tool, or "I went to the gym"), list habits with completion status, and auto-create habits on first mention. New `list_habits_text` and `log_habit_today` methods in `AssistantService`.
+- **Database bug fix** — `set_meta` was unreachable dead code after `get_meta`'s return; split into a working method so the birthday scheduler no longer crashes on its daily check.
 - **Habit tracker page** — new `/habits` page in the web viewer. Add habits, toggle today's completion with a tap, view current/longest streak stats per habit, 7-day history strip, and bottom totals panel (tracked count, done-today count, best streak). Habits scoped per chat like todos. Backend: `habits` + `habit_completions` tables in `db.py` and web app, streak calculation, `/api/habits/<id>/toggle` endpoint.
 - **Feature roadmap** — added FEATURES.md documenting planned features including recurring reminders, habit tracking, social features, and expanded integrations.
 - **Multi-page web interface** — the web viewer is now three pages: a drag-and-drop kanban **Board** (to_do/doing/done) backed by a new `status` column and `/api/todos/<id>/status` endpoint, an **XP** quest-log scoreboard, and a pixel **Field** that grows a daisy per completed todo (debug slider + WebAudio chiptune toggle).
