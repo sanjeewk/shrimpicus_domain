@@ -52,6 +52,7 @@ class Database:
               chat_id INTEGER NOT NULL,
               task TEXT NOT NULL,
               category TEXT NOT NULL DEFAULT 'General',
+              status TEXT NOT NULL DEFAULT 'to_do',
               done INTEGER NOT NULL DEFAULT 0,
               notion_page_id TEXT,
               created_at TEXT NOT NULL
@@ -88,6 +89,11 @@ class Database:
             self.conn.execute(
                 "ALTER TABLE todos ADD COLUMN category TEXT NOT NULL DEFAULT 'General'"
             )
+        if "status" not in cols:
+            self.conn.execute(
+                "ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'to_do'"
+            )
+            self.conn.execute("UPDATE todos SET status = 'done' WHERE done = 1")
 
     def add_reminder(self, chat_id: int, content: str, due_at_iso: str, poll_required: bool = True) -> int:
         cur = self.conn.execute(
@@ -200,7 +206,21 @@ class Database:
         return self.conn.execute(query, args).fetchall()
 
     def set_todo_done(self, todo_id: int, done: bool = True) -> None:
-        self.conn.execute("UPDATE todos SET done = ? WHERE id = ?", (1 if done else 0, todo_id))
+        new_status = "done" if done else "to_do"
+        self.conn.execute(
+            "UPDATE todos SET done = ?, status = ? WHERE id = ?",
+            (1 if done else 0, new_status, todo_id),
+        )
+        self.conn.commit()
+
+    def set_todo_status(self, todo_id: int, status: str) -> None:
+        if status not in ("to_do", "doing", "done"):
+            raise ValueError(f"invalid todo status: {status!r}")
+        done_flag = 1 if status == "done" else 0
+        self.conn.execute(
+            "UPDATE todos SET status = ?, done = ? WHERE id = ?",
+            (status, done_flag, todo_id),
+        )
         self.conn.commit()
 
     def add_birthday(self, chat_id: int, person_name: str, date_ymd: str) -> int:

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shrimpicus // {% block page_title %}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="page page--{{ active_page }}">
+  <main class="cabinet">
+    <header class="topbar">
+      <div class="topbar__brand">
+        <span class="topbar__logo" aria-hidden="true">
+          <svg viewBox="0 0 16 16" shape-rendering="crispEdges" width="28" height="28">
+            <rect x="3" y="6" width="10" height="6" fill="#ff7aa2"/>
+            <rect x="2" y="7" width="1" height="4" fill="#ff7aa2"/>
+            <rect x="13" y="7" width="1" height="4" fill="#ff7aa2"/>
+            <rect x="4" y="5" width="8" height="1" fill="#ff7aa2"/>
+            <rect x="5" y="4" width="6" height="1" fill="#ff7aa2"/>
+            <rect x="10" y="7" width="1" height="1" fill="#0a0a14"/>
+            <rect x="4" y="12" width="2" height="2" fill="#ff7aa2"/>
+            <rect x="10" y="12" width="2" height="2" fill="#ff7aa2"/>
+          </svg>
+        </span>
+        <span class="topbar__name">Shrimpicus</span>
+      </div>
+      <nav class="topbar__nav">
+        <a href="{{ url_for('board') }}" class="navlink {% if active_page == 'board' %}is-active{% endif %}">Board</a>
+        <a href="{{ url_for('xp') }}" class="navlink {% if active_page == 'xp' %}is-active{% endif %}">XP</a>
+        <a href="{{ url_for('field') }}" class="navlink {% if active_page == 'field' %}is-active{% endif %}">Field</a>
+      </nav>
+    </header>
+
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

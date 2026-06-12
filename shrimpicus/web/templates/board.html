@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block page_title %}Board{% endblock %}
+
+{% block content %}
+<section class="board-toolbar">
+  <form class="board-toolbar__filter" method="get" action="{{ url_for('board') }}">
+    <label class="board-toolbar__label" for="chat">Chat</label>
+    <select id="chat" name="chat" onchange="this.form.submit()">
+      <option value="">All chats</option>
+      {% for c in chats %}
+      <option value="{{ c.id }}" {% if selected_chat == c.id %}selected{% endif %}>
+        Chat {{ c.id }} · {{ c.n }}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+  <div class="board-toolbar__counts">
+    <span class="pill pill--todo">To do · {{ columns.to_do|length }}</span>
+    <span class="pill pill--doing">Doing · {{ columns.doing|length }}</span>
+    <span class="pill pill--done">Done · {{ columns.done|length }}</span>
+  </div>
+</section>
+
+<section class="kanban">
+  {% for status, label in [('to_do', 'To do'), ('doing', 'Doing'), ('done', 'Done')] %}
+  <div class="column column--{{ status }}">
+    <div class="column__header">
+      <span class="column__title">{{ label }}</span>
+      <span class="column__count">{{ columns[status]|length }}</span>
+    </div>
+    <ul class="column__list" data-status="{{ status }}">
+      {% for t in columns[status] %}
+      <li class="card" data-id="{{ t.id }}" data-status="{{ t.status }}">
+        <div class="card__id">#{{ "%04d"|format(t.id) }}</div>
+        <div class="card__task">{{ t.task }}</div>
+        <div class="card__meta">
+          <span class="chip chip--chat">chat {{ t.chat_id }}</span>
+          <span class="chip chip--time">{{ t.created_human }}</span>
+          {% if t.linked_notion %}<span class="chip chip--notion">notion</span>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="{{ url_for('static', filename='board.js') }}"></script>
+{% endblock %}

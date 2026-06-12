@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block page_title %}Field{% endblock %}
+
+{% block content %}
+<section class="field" data-done-count="{{ done_count }}">
+  <div class="field__sky"></div>
+  <div class="field__sun" aria-hidden="true"></div>
+  <div class="field__clouds" aria-hidden="true">
+    <span class="cloud cloud--a"></span>
+    <span class="cloud cloud--b"></span>
+    <span class="cloud cloud--c"></span>
+  </div>
+  <div class="field__hills" aria-hidden="true"></div>
+  <div class="field__ground">
+    <div class="field__grass"></div>
+    <div class="field__flowers" id="flowers" aria-hidden="true"></div>
+    <div class="field__fence" aria-hidden="true"></div>
+  </div>
+
+  <div class="field__hud">
+    <div class="field__counter">
+      <span class="field__counter-label">FLOWERS</span>
+      <span class="field__counter-value" id="flowerCount">{{ done_count }}</span>
+    </div>
+    <button type="button" class="field__audio" id="audioToggle" aria-pressed="false">
+      <span class="field__audio-icon" aria-hidden="true">♪</span>
+      <span class="field__audio-text">MUSIC: OFF</span>
+    </button>
+    <details class="field__debug">
+      <summary>DEBUG</summary>
+      <label class="field__debug-row">
+        <span>Flower count</span>
+        <input type="range" id="flowerSlider" min="0" max="500" step="1" value="{{ done_count }}" />
+        <input type="number" id="flowerNumber" min="0" max="2000" step="1" value="{{ done_count }}" />
+      </label>
+      <button type="button" id="flowerReset" class="field__debug-reset">Reset to {{ done_count }}</button>
+    </details>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='field.js') }}"></script>
+{% endblock %}
