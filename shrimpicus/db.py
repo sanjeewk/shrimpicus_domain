@@ -74,6 +74,26 @@ class Database:
               created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS habits (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              chat_id INTEGER NOT NULL,
+              name TEXT NOT NULL,
+              weekly_goal INTEGER NOT NULL DEFAULT 7,
+              created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS habit_completions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              habit_id INTEGER NOT NULL,
+              date_ymd TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              UNIQUE(habit_id, date_ymd),
+              FOREIGN KEY(habit_id) REFERENCES habits(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_habit_completions
+              ON habit_completions(habit_id, date_ymd);
+
             CREATE TABLE IF NOT EXISTS meta (
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
@@ -260,6 +280,49 @@ class Database:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def add_habit(self, chat_id: int, name: str, weekly_goal: int = 7) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO habits(chat_id, name, weekly_goal, created_at) VALUES (?, ?, ?, ?)",
+            (chat_id, name, weekly_goal, utc_now_iso()),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def list_habits(self, chat_id: int) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM habits WHERE chat_id = ? ORDER BY id ASC",
+            (chat_id,),
+        ).fetchall()
+
+    def delete_habit(self, habit_id: int) -> None:
+        self.conn.execute("DELETE FROM habit_completions WHERE habit_id = ?", (habit_id,))
+        self.conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
+        self.conn.commit()
+
+    def toggle_habit_completion(self, habit_id: int, date_ymd: str) -> bool:
+        """Toggle a habit's completion for a date. Returns True if now completed."""
+        existing = self.conn.execute(
+            "SELECT id FROM habit_completions WHERE habit_id = ? AND date_ymd = ?",
+            (habit_id, date_ymd),
+        ).fetchone()
+        if existing:
+            self.conn.execute("DELETE FROM habit_completions WHERE id = ?", (existing["id"],))
+            self.conn.commit()
+            return False
+        self.conn.execute(
+            "INSERT INTO habit_completions(habit_id, date_ymd, created_at) VALUES (?, ?, ?)",
+            (habit_id, date_ymd, utc_now_iso()),
+        )
+        self.conn.commit()
+        return True
+
+    def habit_completion_dates(self, habit_id: int) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT date_ymd FROM habit_completions WHERE habit_id = ? ORDER BY date_ymd ASC",
+            (habit_id,),
+        ).fetchall()
+        return [r["date_ymd"] for r in rows]
+
     def get_meta(self, key: str) -> str | None:
         row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
@@ -273,3 +336,24 @@ class Database:
             (key, value),
         )
         self.conn.commit()
+
+    # --- read helpers used for RAG context and stats ------------------------ #
+    def find_habit(self, chat_id: int, name_or_id: str) -> sqlite3.Row | None:
+        """Resolve a habit by numeric id or (case-insensitive) name for a chat."""
+        text = str(name_or_id).strip()
+        if text.lstrip("#").isdigit():
+            return self.conn.execute(
+                "SELECT * FROM habits WHERE chat_id = ? AND id = ? LIMIT 1",
+                (chat_id, int(text.lstrip("#"))),
+            ).fetchone()
+        return self.conn.execute(
+            "SELECT * FROM habits WHERE chat_id = ? AND lower(name) = lower(?) LIMIT 1",
+            (chat_id, text),
+        ).fetchone()
+
+    def completed_todo_count(self, chat_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM todos WHERE chat_id = ? AND done = 1",
+            (chat_id,),
+        ).fetchone()
+        return int(row["n"]) if row else 0

@@ -32,3 +32,27 @@ class OllamaClient:
             resp.raise_for_status()
             data = resp.json()
         return data.get("message", {}).get("content", "").strip() or "I could not generate a response."
+
+    async def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> dict:
+        """Low-level /api/chat call returning the raw ``message`` dict.
+
+        The returned message may contain ``content`` (a plain reply) and/or
+        ``tool_calls`` (the model asking to run a tool). Used by the agentic
+        loop in AssistantService.
+        """
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        return data.get("message", {}) or {}

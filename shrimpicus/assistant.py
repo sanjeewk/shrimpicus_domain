@@ -135,17 +135,130 @@ class AssistantService:
             return f"Journal saved to {file_path}."
         return "Journal saved in database. Set OBSIDIAN_VAULT_PATH to write files."
 
+    # --- habits ------------------------------------------------------------- #
+    def list_habits_text(self, chat_id: int) -> str:
+        rows = self.db.list_habits(chat_id)
+        if not rows:
+            return "No habits tracked yet."
+        today = datetime.now(timezone.utc).date().isoformat()
+        lines = []
+        for h in rows:
+            done = today in self.db.habit_completion_dates(h["id"])
+            mark = "x" if done else " "
+            lines.append(f"#{h['id']} [{mark}] {h['name']}")
+        return "\n".join(lines)
+
+    def log_habit_today(self, chat_id: int, name_or_id: str) -> str:
+        name_or_id = str(name_or_id).strip()
+        if not name_or_id:
+            return "Which habit? Give a name or id."
+        habit = self.db.find_habit(chat_id, name_or_id)
+        if habit is None:
+            # auto-create by name so "I went to the gym" just works
+            if name_or_id.lstrip("#").isdigit():
+                return f"No habit #{name_or_id.lstrip('#')} found."
+            habit_id = self.db.add_habit(chat_id, name_or_id)
+            name = name_or_id
+        else:
+            habit_id = habit["id"]
+            name = habit["name"]
+        today = datetime.now(timezone.utc).date().isoformat()
+        now_done = self.db.toggle_habit_completion(habit_id, today)
+        if now_done:
+            return f"Logged '{name}' for today. Keep the streak going."
+        return f"Unlogged '{name}' for today."
+
+    # --- RAG context -------------------------------------------------------- #
+    def build_context(self, chat_id: int) -> str:
+        """Snapshot of the user's current state, injected into the LLM prompt."""
+        parts: list[str] = []
+        todos = self.list_todos_text(chat_id)
+        if todos and todos != "No open todos.":
+            parts.append("OPEN TODOS:\n" + todos)
+        reminders = self.list_reminders_text(chat_id)
+        if reminders and reminders != "No reminders yet.":
+            parts.append("REMINDERS:\n" + reminders)
+        habits = self.list_habits_text(chat_id)
+        if habits and habits != "No habits tracked yet.":
+            parts.append("HABITS (today):\n" + habits)
+        done_count = self.db.completed_todo_count(chat_id)
+        parts.append(f"Completed todos all-time: {done_count}.")
+        if not parts:
+            return "The user has no todos, reminders, or habits yet."
+        return "\n\n".join(parts)
+
     async def free_text(self, chat_id: int, text: str) -> str:
         parsed = await self._try_rule_based(chat_id, text)
         if parsed:
             return parsed
         try:
+            acted = await self._run_agent(chat_id, text)
+            if acted:
+                return acted
             return await self.ollama.answer(text)
         except Exception as exc:  # noqa: BLE001
             return (
                 f"Ollama is unavailable ({exc}). Try !helpme for command-based control "
                 "while the model is offline."
             )
+
+    async def _run_agent(self, chat_id: int, text: str, max_steps: int = 4) -> str | None:
+        """Agentic tool-calling loop with RAG context.
+
+        Injects a snapshot of the user's data (RAG), offers the tool registry,
+        and runs the model→tool→model loop until it produces a plain reply or
+        the step budget is exhausted. Returns None if the model never used a
+        tool *and* gave no content, so the caller can fall back to plain chat.
+        """
+        from shrimpicus import tools as tools_mod  # local import avoids a cycle
+
+        context = self.build_context(chat_id)
+        messages: list[dict] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are Shrimpicus, a concise personal assistant. Use the provided "
+                    "tools to manage the user's todos, reminders, habits, birthdays, and "
+                    "journal whenever they ask you to add, change, complete, or list "
+                    "anything. Do not invent ids — call a list tool first if you need one. "
+                    "After acting, confirm briefly in one or two sentences.\n\n"
+                    "Here is the user's current data for reference:\n" + context
+                ),
+            },
+            {"role": "user", "content": text},
+        ]
+        schemas = tools_mod.ollama_tool_schemas()
+
+        used_a_tool = False
+        for _ in range(max_steps):
+            msg = await self.ollama.chat(messages, tools=schemas)
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                content = (msg.get("content") or "").strip()
+                if used_a_tool:
+                    return content or "Done."
+                return content or None
+
+            used_a_tool = True
+            messages.append(msg)  # echo the assistant turn that requested the tools
+            for call in tool_calls:
+                fn = call.get("function", {})
+                name = fn.get("name", "")
+                args = fn.get("arguments") or {}
+                if isinstance(args, str):
+                    import json
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                result = await tools_mod.dispatch(self, chat_id, name, args)
+                messages.append({"role": "tool", "name": name, "content": result})
+
+        # Ran out of steps mid-loop; surface whatever the last tool said.
+        for m in reversed(messages):
+            if m.get("role") == "tool":
+                return m.get("content")
+        return "I wasn't able to finish that."
 
     async def _try_rule_based(self, chat_id: int, text: str) -> str | None:
         t = text.strip()

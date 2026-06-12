@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     obsidian_vault_path: str = ""
     obsidian_journal_relative: str = "Journal/inbox.md"
 
+    mcp_chat_id: int = 0
+
     model_config = SettingsConfigDict(env_file=str(DEFAULT_ENV_FILE), env_file_encoding="utf-8")
 
     @field_validator("assistant_channels", mode="before")

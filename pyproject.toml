@@ -17,10 +17,14 @@ dependencies = [
 voice = [
   "faster-whisper>=1.0.3",
 ]
+mcp = [
+  "mcp>=1.2.0",
+]
 
 [project.scripts]
 shrimpicus = "shrimpicus.main:main"
 shrimpicus-web = "shrimpicus.web.app:main"
+shrimpicus-mcp = "shrimpicus.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

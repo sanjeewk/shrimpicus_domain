@@ -58,10 +58,49 @@ shrimpicus
 - If a reminder receives "No", it is snoozed by `DEFAULT_SNOOZE_MINUTES`.
 - Notion integration is optional and only active when token/database env vars are set.
 
+## RAG + Tool Calling
+
+The assistant now uses **RAG (Retrieval-Augmented Generation)** to inject context about your todos, reminders, and habits into every conversation, and **tool calling** to directly add, complete, or modify your data when you ask in natural language.
+
+**Examples:**
+- *"add buy milk to my list"* — uses the `add_todo` tool
+- *"mark todo 3 done and add a reminder to stretch in 20 minutes"* — chains `complete_todo` + `add_reminder`
+- *"I went to the gym today"* — logs a habit (auto-creates if needed)
+
+The model decides which tools to call based on your request. Fast regex shortcuts (`td`, `tdl`) still work and are faster for exact patterns.
+
+## MCP Server
+
+The same tool registry is exposed as an **MCP server** so external clients (Claude Desktop, etc.) can manage your todos/reminders/habits.
+
+**Install the MCP dependency:**
+```bash
+pip install -e '.[mcp]'
+```
+
+**Run the server:**
+```bash
+shrimpicus-mcp
+```
+
+**Configure Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "shrimpicus": {
+      "command": "/path/to/shrimpicus/.venv/bin/shrimpicus-mcp"
+    }
+  }
+}
+```
+
+The server uses `MCP_CHAT_ID` from `.env` (defaults to `0`) to scope all operations.
+
 ## Changelog
 
 ### Unreleased
 
+- **Habit tracker page** — new `/habits` page in the web viewer. Add habits, toggle today's completion with a tap, view current/longest streak stats per habit, 7-day history strip, and bottom totals panel (tracked count, done-today count, best streak). Habits scoped per chat like todos. Backend: `habits` + `habit_completions` tables in `db.py` and web app, streak calculation, `/api/habits/<id>/toggle` endpoint.
 - **Feature roadmap** — added FEATURES.md documenting planned features including recurring reminders, habit tracking, social features, and expanded integrations.
 - **Multi-page web interface** — the web viewer is now three pages: a drag-and-drop kanban **Board** (to_do/doing/done) backed by a new `status` column and `/api/todos/<id>/status` endpoint, an **XP** quest-log scoreboard, and a pixel **Field** that grows a daisy per completed todo (debug slider + WebAudio chiptune toggle).
 - **Retro pixel-art web viewer** — `shrimpicus-web` launches a Flask app that reads the existing SQLite DB and renders a single-page Quest Log of todos. Stats panel with XP/HP completion bar, per-chat ("SELECT WORLD") filter, SHOW DEFEATED toggle. Theme synthesizes arcade-cabinet neon (cyan/lime/hot pink/gold), JRPG quest-log framing, and Game-Boy/CRT chrome (scanlines, vignette, boot-flicker, chunky pixel borders). Header has three pixel-SVG spinners (coin, floppy, star).
