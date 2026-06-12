@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block page_title %}Habits{% endblock %}
+
+{% block content %}
+<section class="habits" data-chat="{{ selected_chat if selected_chat is not none else '' }}">
+  <div class="habits__bar">
+    <form class="habits__filter" method="get" action="{{ url_for('habits') }}">
+      <label class="board-toolbar__label" for="chat">Chat</label>
+      <select id="chat" name="chat" onchange="this.form.submit()">
+        {% for c in chats %}
+        <option value="{{ c }}" {% if selected_chat == c %}selected{% endif %}>Chat {{ c }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <form class="habits__add" method="post" action="{{ url_for('habits_add') }}">
+      <input type="hidden" name="chat" value="{{ selected_chat if selected_chat is not none else '' }}">
+      <input class="habits__add-input" type="text" name="name" maxlength="120"
+             placeholder="New habit (e.g. Gym, Read, Meditate)" autocomplete="off" required>
+      <select class="habits__add-goal" name="goal" title="Weekly goal">
+        <option value="1">1×/week</option>
+        <option value="2">2×/week</option>
+        <option value="3">3×/week</option>
+        <option value="4">4×/week</option>
+        <option value="5">5×/week</option>
+        <option value="6">6×/week</option>
+        <option value="7" selected>Every day</option>
+      </select>
+      <button class="habits__add-btn" type="submit">+ Add</button>
+    </form>
+  </div>
+
+  {% if habits %}
+  <ul class="habit-list">
+    {% for h in habits %}
+    <li class="habit {% if h.done_today %}is-done{% endif %} {% if h.goal_met %}goal-met{% endif %}"
+        data-id="{{ h.id }}" data-weekly-goal="{{ h.weekly_goal }}">
+      <button type="button" class="habit__check" aria-pressed="{{ 'true' if h.done_today else 'false' }}"
+              title="Toggle today">
+        <span class="habit__check-mark" aria-hidden="true">✓</span>
+      </button>
+
+      <div class="habit__body">
+        <div class="habit__name">
+          {{ h.name }}
+          {% if h.goal_met %}
+          <span class="habit__duck" aria-label="Goal achieved!" title="Weekly goal achieved!">
+            <svg viewBox="0 0 32 32" width="20" height="20" class="duck-spin">
+              <ellipse cx="16" cy="20" rx="9" ry="7" fill="#fbbf24"/>
+              <circle cx="16" cy="13" r="6" fill="#fbbf24"/>
+              <ellipse cx="9" cy="12" rx="3" ry="2.5" fill="#fbbf24"/>
+              <circle cx="14" cy="12" r="1.5" fill="#1a0d2e"/>
+              <circle cx="18" cy="12" r="1.5" fill="#1a0d2e"/>
+              <path d="M 8 12 Q 5 12 4 13" stroke="#ff570a" stroke-width="1.5" fill="none"/>
+            </svg>
+          </span>
+          {% endif %}
+        </div>
+        <div class="habit__goal-badge" title="This week: {{ h.week_count }} / {{ h.weekly_goal }}">
+          <span class="habit__goal-progress">{{ h.week_count }}/{{ h.weekly_goal }}</span> this week
+        </div>
+        <div class="habit__week" aria-hidden="true">
+          {% for d in h.last7 %}
+          <button type="button" class="habit__day {% if d.done %}is-on{% endif %} {% if d.is_today %}is-today{% endif %}"
+                  data-date="{{ d.date }}" title="Toggle {{ d.date }}">
+            <i class="habit__dot"></i><em>{{ d.label }}</em>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="habit__streaks">
+        <span class="habit__streak" title="Current streak">
+          <b class="js-current">{{ h.current_streak }}</b><small>streak</small>
+        </span>
+        <span class="habit__streak habit__streak--best" title="Longest streak">
+          <b class="js-best">{{ h.longest_streak }}</b><small>best</small>
+        </span>
+      </div>
+
+      <form class="habit__delete" method="post" action="{{ url_for('habits_delete', habit_id=h.id) }}"
+            onsubmit="return confirm('Delete this habit and all its history?');">
+        <input type="hidden" name="chat" value="{{ selected_chat if selected_chat is not none else '' }}">
+        <button type="submit" class="habit__delete-btn" title="Delete habit">✕</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="habits__empty">
+    <p>No habits tracked yet{% if selected_chat is not none %} in chat {{ selected_chat }}{% endif %}.</p>
+    <p>Add one above to start building a streak.</p>
+  </div>
+  {% endif %}
+
+  <section class="habits__stats">
+    <div class="stat-card">
+      <span class="stat-card__label">Tracking</span>
+      <span class="stat-card__value">{{ totals.tracked }}</span>
+      <span class="stat-card__unit">habits</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__label">Done today</span>
+      <span class="stat-card__value js-done-today">{{ totals.done_today }}</span>
+      <span class="stat-card__unit">/ {{ totals.tracked }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__label">Best streak</span>
+      <span class="stat-card__value">{{ totals.best_streak }}</span>
+      <span class="stat-card__unit">days</span>
+    </div>
+  </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='habits.js') }}"></script>
+{% endblock %}
