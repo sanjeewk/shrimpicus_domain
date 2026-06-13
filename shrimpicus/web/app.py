@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 
+from shrimpicus import auth as auth_utils
 from shrimpicus.config import Settings
 
 
@@ -86,6 +89,25 @@ def _ensure_habit_tables(conn: sqlite3.Connection) -> None:
     if "weekly_goal" not in cols:
         conn.execute("ALTER TABLE habits ADD COLUMN weekly_goal INTEGER NOT NULL DEFAULT 7")
     conn.commit()
+
+
+def login_required(f):
+    """Decorator to require authentication for a route."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def get_current_user(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """Get the currently logged-in user from session."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
 
 
 def _habit_stats(dates: list[str], today: date) -> dict:
@@ -184,12 +206,100 @@ def create_app(db_path: Path | None = None) -> Flask:
 
     app = Flask(__name__)
     app.config["DB_PATH"] = resolved_db
+    app.secret_key = secrets.token_hex(32)  # Generate secure secret key for sessions
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 
     @app.route("/")
     def root():
+        # Redirect to login if not authenticated, otherwise to board
+        if "user_id" not in session:
+            return redirect(url_for("login"))
         return redirect(url_for("board"))
 
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "").strip()
+
+            if not username or not password:
+                return render_template("login.html", error="Username and password are required.")
+
+            conn = _connect(app.config["DB_PATH"])
+            try:
+                user = conn.execute(
+                    "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
+                    (username,),
+                ).fetchone()
+
+                if user and auth_utils.verify_password(user["password_hash"], password):
+                    session["user_id"] = user["id"]
+                    session["username"] = user["username"]
+                    session.permanent = True
+                    return redirect(url_for("board"))
+                else:
+                    return render_template("login.html", error="Invalid username or password.")
+            finally:
+                conn.close()
+
+        return render_template("login.html")
+
+    @app.route("/signup", methods=["GET", "POST"])
+    def signup():
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "").strip()
+            password_confirm = request.form.get("password_confirm", "").strip()
+
+            # Validation
+            username_error = auth_utils.validate_username(username)
+            if username_error:
+                return render_template("signup.html", error=username_error)
+
+            password_error = auth_utils.validate_password(password)
+            if password_error:
+                return render_template("signup.html", error=password_error)
+
+            if password != password_confirm:
+                return render_template("signup.html", error="Passwords do not match.")
+
+            conn = _connect(app.config["DB_PATH"])
+            try:
+                # Check if username already exists
+                existing = conn.execute(
+                    "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
+                    (username,),
+                ).fetchone()
+
+                if existing:
+                    return render_template("signup.html", error="Username already taken.")
+
+                # Create user
+                password_hash = auth_utils.hash_password(password)
+                cur = conn.execute(
+                    "INSERT INTO users(username, password_hash, created_at) VALUES (?, ?, ?)",
+                    (username.lower(), password_hash, datetime.now(timezone.utc).isoformat()),
+                )
+                user_id = cur.lastrowid
+                conn.commit()
+
+                # Auto-login
+                session["user_id"] = user_id
+                session["username"] = username.lower()
+                session.permanent = True
+                return redirect(url_for("board"))
+            finally:
+                conn.close()
+
+        return render_template("signup.html")
+
+    @app.route("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
+
     @app.route("/board")
+    @login_required
     def board():
         conn = _connect(app.config["DB_PATH"])
         try:
@@ -393,6 +503,189 @@ def create_app(db_path: Path | None = None) -> Flask:
             return jsonify({"id": todo_id, "status": status})
         finally:
             conn.close()
+
+    @app.route("/social")
+    @login_required
+    def social():
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            user_id = session["user_id"]
+
+            # Get user's groups
+            groups_data = []
+            groups = conn.execute(
+                """
+                SELECT g.* FROM groups g
+                JOIN group_members gm ON gm.group_id = g.id
+                WHERE gm.user_id = ?
+                ORDER BY g.created_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+
+            for group in groups:
+                members = conn.execute(
+                    """
+                    SELECT u.id, u.username FROM users u
+                    JOIN group_members gm ON gm.user_id = u.id
+                    WHERE gm.group_id = ?
+                    ORDER BY gm.joined_at ASC
+                    """,
+                    (group["id"],),
+                ).fetchall()
+
+                # Get today's stats for each member
+                today = datetime.now(timezone.utc).date().isoformat()
+                members_with_stats = []
+                for member in members:
+                    todos_done = conn.execute(
+                        """
+                        SELECT COUNT(*) AS n FROM todos
+                        WHERE user_id = ? AND done = 1
+                          AND DATE(created_at) = ?
+                        """,
+                        (member["id"], today),
+                    ).fetchone()["n"]
+
+                    habits_logged = conn.execute(
+                        """
+                        SELECT COUNT(*) AS n FROM habit_completions hc
+                        JOIN habits h ON h.id = hc.habit_id
+                        WHERE h.user_id = ? AND hc.date_ymd = ?
+                        """,
+                        (member["id"], today),
+                    ).fetchone()["n"]
+
+                    members_with_stats.append({
+                        "id": member["id"],
+                        "username": member["username"],
+                        "todos_done_today": todos_done,
+                        "habits_logged_today": habits_logged,
+                    })
+
+                groups_data.append({
+                    "id": group["id"],
+                    "name": group["name"],
+                    "members": members_with_stats,
+                })
+
+            # Get user's friends
+            friends = conn.execute(
+                """
+                SELECT u.* FROM users u
+                JOIN friendships f ON f.friend_id = u.id
+                WHERE f.user_id = ?
+                ORDER BY u.username
+                """,
+                (user_id,),
+            ).fetchall()
+
+            return render_template(
+                "social.html",
+                active_page="social",
+                groups=groups_data,
+                friends=[{"id": f["id"], "username": f["username"]} for f in friends],
+            )
+        finally:
+            conn.close()
+
+    @app.route("/social/group/create", methods=["POST"])
+    @login_required
+    def social_create_group():
+        name = request.form.get("name", "").strip()
+        if not name:
+            return redirect(url_for("social"))
+
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            user_id = session["user_id"]
+            cur = conn.execute(
+                "INSERT INTO groups(name, created_by_user_id, created_at) VALUES (?, ?, ?)",
+                (name, user_id, datetime.now(timezone.utc).isoformat()),
+            )
+            group_id = cur.lastrowid
+            # Auto-add creator
+            conn.execute(
+                "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
+                (group_id, user_id, datetime.now(timezone.utc).isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return redirect(url_for("social"))
+
+    @app.route("/social/group/<int:group_id>/add_member", methods=["POST"])
+    @login_required
+    def social_add_member(group_id: int):
+        username = request.form.get("username", "").strip()
+        if not username:
+            return redirect(url_for("social"))
+
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            # Check member count
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM group_members WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()["n"]
+            if count >= 10:
+                return redirect(url_for("social"))  # Group full
+
+            # Find user by username
+            target_user = conn.execute(
+                "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
+                (username,),
+            ).fetchone()
+            if not target_user:
+                return redirect(url_for("social"))  # User not found
+
+            # Add to group
+            try:
+                conn.execute(
+                    "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
+                    (group_id, target_user["id"], datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                pass  # Already a member
+        finally:
+            conn.close()
+        return redirect(url_for("social"))
+
+    @app.route("/social/friend/add", methods=["POST"])
+    @login_required
+    def social_add_friend():
+        username = request.form.get("username", "").strip()
+        if not username:
+            return redirect(url_for("social"))
+
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            user_id = session["user_id"]
+            # Find friend by username
+            friend = conn.execute(
+                "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
+                (username,),
+            ).fetchone()
+            if not friend or friend["id"] == user_id:
+                return redirect(url_for("social"))
+
+            # Add bidirectional friendship
+            try:
+                conn.execute(
+                    "INSERT INTO friendships(user_id, friend_id, created_at) VALUES (?, ?, ?)",
+                    (user_id, friend["id"], datetime.now(timezone.utc).isoformat()),
+                )
+                conn.execute(
+                    "INSERT INTO friendships(user_id, friend_id, created_at) VALUES (?, ?, ?)",
+                    (friend["id"], user_id, datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                pass  # Already friends
+        finally:
+            conn.close()
+        return redirect(url_for("social"))
 
     return app
 

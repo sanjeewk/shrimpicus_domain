@@ -11,6 +11,7 @@ dependencies = [
   "pydantic-settings>=2.6.1",
   "python-dateutil>=2.9.0",
   "flask>=3.0.0",
+  "argon2-cffi>=25.0.0",
 ]
 
 [project.optional-dependencies]

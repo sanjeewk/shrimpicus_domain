@@ -56,12 +56,14 @@ class AssistantService:
         notion: NotionService,
         journal: ObsidianJournal,
         ollama: OllamaClient,
+        bot=None,  # Optional Discord bot for social notifications
     ):
         self.settings = settings
         self.db = db
         self.notion = notion
         self.journal = journal
         self.ollama = ollama
+        self.bot = bot
 
     def add_reminder_minutes(self, chat_id: int, minutes: int, content: str, poll_required: bool = True) -> int:
         due_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
@@ -113,8 +115,15 @@ class AssistantService:
                 lines.extend(grouped[cat])
         return "\n".join(lines)
 
-    def mark_todo_done(self, todo_id: int) -> str:
+    def mark_todo_done(self, todo_id: int, chat_id: int | None = None) -> str:
         self.db.set_todo_done(todo_id, True)
+        # Trigger social notifications if bot is available
+        if self.bot and chat_id:
+            import asyncio
+            from shrimpicus import social_notifications
+            asyncio.create_task(
+                social_notifications.check_and_notify_goals(self.db, self.bot, chat_id)
+            )
         return f"Marked todo #{todo_id} as done."
 
     def add_birthday(self, chat_id: int, person_name: str, date_text: str) -> str:

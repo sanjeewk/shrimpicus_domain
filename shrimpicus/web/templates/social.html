@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Social - Shrimpicus{% endblock %}
+
+{% block content %}
+<div style="padding: 2rem;">
+    <h1 style="color: #0ff; margin-bottom: 2rem;">Social</h1>
+
+    <!-- Groups Section -->
+    <section style="margin-bottom: 3rem;">
+        <h2 style="color: #ff00ff; margin-bottom: 1rem;">Your Groups</h2>
+
+        <!-- Create Group Form -->
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid #0ff; padding: 1rem; margin-bottom: 1rem;">
+            <form method="POST" action="{{ url_for('social_create_group') }}" style="display: flex; gap: 0.5rem;">
+                <input type="text" name="name" placeholder="Group name" required
+                    style="flex: 1; padding: 0.5rem; background: rgba(0,0,0,0.5); border: 1px solid #0ff; color: #fff;">
+                <button type="submit" style="padding: 0.5rem 1rem; background: #0ff; color: #000; border: none; cursor: pointer;">
+                    Create Group
+                </button>
+            </form>
+        </div>
+
+        <!-- Groups List -->
+        {% if groups %}
+        <div style="display: grid; gap: 1rem;">
+            {% for group in groups %}
+            <div style="background: rgba(0,0,0,0.3); border: 2px solid #0ff; padding: 1.5rem; border-radius: 8px;">
+                <h3 style="color: #ffcc00; margin-bottom: 1rem;">{{ group.name }}</h3>
+
+                <!-- Add Member Form -->
+                <form method="POST" action="{{ url_for('social_add_member', group_id=group.id) }}"
+                    style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                    <input type="text" name="username" placeholder="Add member by username"
+                        style="flex: 1; padding: 0.4rem; background: rgba(0,0,0,0.5); border: 1px solid #0ff; color: #fff; font-size: 0.8rem;">
+                    <button type="submit" style="padding: 0.4rem 0.8rem; background: #ff00ff; color: #000; border: none; cursor: pointer; font-size: 0.8rem;">
+                        Add
+                    </button>
+                </form>
+
+                <!-- Members List -->
+                <div style="display: grid; gap: 0.5rem;">
+                    {% for member in group.members %}
+                    <div style="background: rgba(0,0,0,0.5); padding: 0.75rem; border-left: 3px solid #0ff; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="color: #0ff; font-weight: bold;">{{ member.username }}</span>
+                            <span style="color: #999; margin-left: 1rem; font-size: 0.8rem;">
+                                📝 {{ member.todos_done_today }} todos |
+                                ✅ {{ member.habits_logged_today }} habits
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div style="margin-top: 0.5rem; color: #999; font-size: 0.7rem;">
+                    {{ group.members|length }} / 10 members
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="color: #999; text-align: center; padding: 2rem;">
+            No groups yet. Create your first group above!
+        </div>
+        {% endif %}
+    </section>
+
+    <!-- Friends Section -->
+    <section>
+        <h2 style="color: #ff00ff; margin-bottom: 1rem;">Your Friends</h2>
+
+        <!-- Add Friend Form -->
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid #0ff; padding: 1rem; margin-bottom: 1rem;">
+            <form method="POST" action="{{ url_for('social_add_friend') }}" style="display: flex; gap: 0.5rem;">
+                <input type="text" name="username" placeholder="Friend's username" required
+                    style="flex: 1; padding: 0.5rem; background: rgba(0,0,0,0.5); border: 1px solid #0ff; color: #fff;">
+                <button type="submit" style="padding: 0.5rem 1rem; background: #0ff; color: #000; border: none; cursor: pointer;">
+                    Add Friend
+                </button>
+            </form>
+        </div>
+
+        <!-- Friends List -->
+        {% if friends %}
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem;">
+            {% for friend in friends %}
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid #ff00ff; padding: 1rem; text-align: center; border-radius: 4px;">
+                <div style="color: #ff00ff; font-weight: bold;">{{ friend.username }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="color: #999; text-align: center; padding: 2rem;">
+            No friends yet. Add friends to create groups together!
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
