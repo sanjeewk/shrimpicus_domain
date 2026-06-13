@@ -96,10 +96,37 @@ shrimpicus-mcp
 
 The server uses `MCP_CHAT_ID` from `.env` (defaults to `0`) to scope all operations.
 
+## Social Features
+
+Shrimpicus now supports multi-user accounts with groups and friend connections.
+
+### Getting Started
+
+1. **Sign up** — Visit `http://127.0.0.1:5005` and create an account (3-20 character username, 6+ char password)
+2. **Add friends** — Go to `/social` and add friends by username
+3. **Create groups** — Create a group (up to 10 members), add friends to it
+4. **Track progress** — See real-time stats for each group member (todos done today, habits logged today)
+
+### Group Notifications (Discord)
+
+When any user in a group:
+- ✅ Completes **all their open todos** for the day, OR
+- 🔥 Completes **2+ todos in one day**
+
+The Discord bot sends a notification to the shared channel celebrating their progress.
+
+### Data Migration
+
+Existing todos, reminders, habits, and other data automatically belong to **User ID 1** (the default user). Create that account first to access your existing data, or your data will be isolated until you log in as user 1.
+
 ## Changelog
 
 ### Unreleased
 
+- **Social features with multi-user authentication** — user accounts with username/password (argon2 hashing), login/signup pages, session management. Create groups (max 10 members), add friends, and view real-time stats (todos done, habits logged) for each group member.
+- **Group notifications** — Discord bot notifies groups when members complete all their daily todos or complete 2+ todos in one day. Notifications appear in the shared Discord channel with group context.
+- **Multi-user data model** — all entities (todos, reminders, habits, birthdays, journal) now scoped to `user_id`. Existing data migrates to default user (ID 1) automatically.
+- **Social page** — new `/social` web interface to manage groups, add friends by username, and see group members' daily progress at a glance.
 - **RAG + tool calling** — the assistant now injects a context snapshot (todos, reminders, habits, completion count) into every free-text conversation and can directly add, complete, or modify your data via an agentic tool-calling loop. Natural commands like "add buy milk and mark todo 3 done" just work.
 - **MCP server** — `shrimpicus-mcp` exposes the same tool registry over stdio so Claude Desktop (or any MCP client) can manage your todos/reminders/habits. Install with `pip install -e '.[mcp]'`.
 - **Habit tracking** — log daily habits via Discord (`log_habit` tool, or "I went to the gym"), list habits with completion status, and auto-create habits on first mention. New `list_habits_text` and `log_habit_today` methods in `AssistantService`.
