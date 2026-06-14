@@ -91,6 +91,73 @@ def _ensure_habit_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          password_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          owner_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (owner_id) REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS group_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          joined_at TEXT NOT NULL,
+          UNIQUE(group_id, user_id),
+          FOREIGN KEY (group_id) REFERENCES groups(id),
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_username ON users(username);
+        CREATE INDEX IF NOT EXISTS idx_group_members ON group_members(group_id, user_id);
+        """
+    )
+    conn.commit()
+
+
+def _ensure_user_scoped_data(conn: sqlite3.Connection) -> None:
+    """Migrate todos and habits to be user-scoped by adding user_id column."""
+    # Add user_id to todos if missing
+    todos_cols = {row["name"] for row in conn.execute("PRAGMA table_info(todos)").fetchall()}
+    if "user_id" not in todos_cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN user_id INTEGER")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id)")
+        conn.commit()
+
+    # Add user_id to habits if missing
+    habits_cols = {row["name"] for row in conn.execute("PRAGMA table_info(habits)").fetchall()}
+    if "user_id" not in habits_cols:
+        conn.execute("ALTER TABLE habits ADD COLUMN user_id INTEGER")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id)")
+        conn.commit()
+
+    # Add user_id to birthdays if table exists
+    try:
+        birthdays_cols = {row["name"] for row in conn.execute("PRAGMA table_info(birthdays)").fetchall()}
+        if birthdays_cols and "user_id" not in birthdays_cols:
+            conn.execute("ALTER TABLE birthdays ADD COLUMN user_id INTEGER")
+            conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist yet
+
+    # Add user_id to journal_entries if table exists
+    try:
+        journal_cols = {row["name"] for row in conn.execute("PRAGMA table_info(journal_entries)").fetchall()}
+        if journal_cols and "user_id" not in journal_cols:
+            conn.execute("ALTER TABLE journal_entries ADD COLUMN user_id INTEGER")
+            conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist yet
+
+
 def login_required(f):
     """Decorator to require authentication for a route."""
     @wraps(f)
@@ -227,6 +294,7 @@ def create_app(db_path: Path | None = None) -> Flask:
 
             conn = _connect(app.config["DB_PATH"])
             try:
+                _ensure_auth_tables(conn)
                 user = conn.execute(
                     "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
                     (username,),
@@ -265,6 +333,7 @@ def create_app(db_path: Path | None = None) -> Flask:
 
             conn = _connect(app.config["DB_PATH"])
             try:
+                _ensure_auth_tables(conn)
                 # Check if username already exists
                 existing = conn.execute(
                     "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
@@ -301,20 +370,35 @@ def create_app(db_path: Path | None = None) -> Flask:
     @app.route("/board")
     @login_required
     def board():
+        user_id = session.get("user_id")
         conn = _connect(app.config["DB_PATH"])
         try:
             _ensure_status_column(conn)
-            chats, selected_chat = _load_chats_and_filter(conn)
-            todos = _load_todos(conn, selected_chat)
+            _ensure_user_scoped_data(conn)
+
+            # Load todos for current user only
+            todos = conn.execute(
+                """SELECT id, task, status, done, category, notion_page_id, created_at
+                   FROM todos WHERE user_id = ? ORDER BY created_at DESC""",
+                (user_id,)
+            ).fetchall()
+
             columns = {"to_do": [], "doing": [], "done": []}
             for t in todos:
-                columns.setdefault(t["status"], columns["to_do"]).append(t)
+                todo_dict = {
+                    "id": t["id"],
+                    "task": t["task"],
+                    "done": bool(t["done"]),
+                    "status": t["status"],
+                    "linked_notion": bool(t["notion_page_id"]),
+                    "created_human": _humanize(_parse_iso(t["created_at"])),
+                }
+                columns.setdefault(t["status"], columns["to_do"]).append(todo_dict)
+
             return render_template(
                 "board.html",
                 active_page="board",
                 columns=columns,
-                chats=[{"id": c["chat_id"], "n": c["n"]} for c in chats],
-                selected_chat=selected_chat,
             )
         finally:
             conn.close()
@@ -337,34 +421,27 @@ def create_app(db_path: Path | None = None) -> Flask:
             conn.close()
 
     @app.route("/habits")
+    @login_required
     def habits():
+        user_id = session.get("user_id")
         conn = _connect(app.config["DB_PATH"])
         try:
             _ensure_habit_tables(conn)
-            selected_chat = request.args.get("chat", type=int)
-
-            # Worlds: union of chats with todos or habits, so a fresh install
-            # with no todos can still pick a world for habits.
-            chat_rows = conn.execute(
-                "SELECT chat_id FROM todos UNION SELECT chat_id FROM habits"
-            ).fetchall()
-            chats = sorted({r["chat_id"] for r in chat_rows})
-            if selected_chat is None and chats:
-                selected_chat = chats[0]
+            _ensure_user_scoped_data(conn)
 
             today = datetime.now(timezone.utc).date()
-            habit_rows = (
-                conn.execute(
-                    "SELECT id, name, weekly_goal FROM habits WHERE chat_id = ? ORDER BY id ASC",
-                    (selected_chat,),
-                ).fetchall()
-                if selected_chat is not None
-                else []
-            )
+            habit_rows = conn.execute(
+                "SELECT id, name, weekly_goal FROM habits WHERE user_id = ? ORDER BY id ASC",
+                (user_id,),
+            ).fetchall()
+
+            # Assign pastel colors to habits
+            pastel_colors = ['#ff9a9e', '#a18cd1', '#fbc2eb', '#ffeaa7', '#74b9ff', '#fd79a8', '#fdcb6e', '#6c5ce7']
 
             habits_view = []
-            totals = {"tracked": 0, "done_today": 0, "best_streak": 0}
-            for h in habit_rows:
+            totals = {"tracked": 0, "done_today": 0, "best_streak": 0, "max_current_streak": 0, "max_longest_streak": 0}
+            all_completions = {}  # habit_id -> set of dates
+            for idx, h in enumerate(habit_rows):
                 dates = [
                     r["date_ymd"]
                     for r in conn.execute(
@@ -372,71 +449,125 @@ def create_app(db_path: Path | None = None) -> Flask:
                         (h["id"],),
                     ).fetchall()
                 ]
+                all_completions[h["id"]] = set(dates)
                 stats = _habit_stats(dates, today)
                 goal_met = stats["week_count"] >= h["weekly_goal"]
+                color = pastel_colors[idx % len(pastel_colors)]
                 habits_view.append({
                     "id": h["id"],
                     "name": h["name"],
                     "weekly_goal": h["weekly_goal"],
                     "goal_met": goal_met,
+                    "color": color,
                     **stats
                 })
                 totals["tracked"] += 1
                 totals["done_today"] += 1 if stats["done_today"] else 0
                 totals["best_streak"] = max(totals["best_streak"], stats["longest_streak"])
+                totals["max_current_streak"] = max(totals["max_current_streak"], stats["current_streak"])
+                totals["max_longest_streak"] = max(totals["max_longest_streak"], stats["longest_streak"])
+
+            # Generate calendar for current month
+            year, month = today.year, today.month
+            first_day = date(year, month, 1)
+            # Find Monday of the week containing first_day
+            days_to_monday = first_day.weekday()
+            cal_start = first_day - timedelta(days=days_to_monday)
+
+            # Generate 5-6 weeks of calendar
+            calendar_weeks = []
+            cursor = cal_start
+            for week_idx in range(6):
+                week = []
+                for day_idx in range(7):
+                    day_date = cursor
+                    in_month = day_date.month == month
+                    completions = []
+                    if in_month:
+                        # Find which habits were completed on this date
+                        for h in habits_view:
+                            if day_date.isoformat() in all_completions.get(h["id"], set()):
+                                completions.append({"color": h["color"]})
+
+                    week.append({
+                        "day": day_date.day,
+                        "is_today": day_date == today,
+                        "in_month": in_month,
+                        "completions": completions
+                    })
+                    cursor += timedelta(days=1)
+                calendar_weeks.append(week)
+                # Stop after we've passed the end of the month
+                if cursor.month != month and week_idx >= 4:
+                    break
 
             return render_template(
                 "habits.html",
                 active_page="habits",
                 habits=habits_view,
                 totals=totals,
-                chats=chats,
-                selected_chat=selected_chat,
+                stats=totals,
+                calendar_weeks=calendar_weeks,
+                current_month=today.strftime("%B %Y"),
             )
         finally:
             conn.close()
 
     @app.route("/habits/add", methods=["POST"])
+    @login_required
     def habits_add():
+        user_id = session.get("user_id")
         name = (request.form.get("name") or "").strip()
-        chat_id = request.form.get("chat", type=int)
         weekly_goal = request.form.get("goal", type=int, default=7)
-        if not name or chat_id is None:
-            return redirect(url_for("habits", chat=chat_id))
+
+        if not name:
+            return redirect(url_for("habits"))
         if weekly_goal not in range(1, 8):
             weekly_goal = 7
+
         conn = _connect(app.config["DB_PATH"])
         try:
             _ensure_habit_tables(conn)
+            _ensure_user_scoped_data(conn)
             conn.execute(
-                "INSERT INTO habits(chat_id, name, weekly_goal, created_at) VALUES (?, ?, ?, ?)",
-                (chat_id, name[:120], weekly_goal, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO habits(user_id, chat_id, name, weekly_goal, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, 0, name[:120], weekly_goal, datetime.now(timezone.utc).isoformat()),
             )
             conn.commit()
         finally:
             conn.close()
-        return redirect(url_for("habits", chat=chat_id))
+        return redirect(url_for("habits"))
 
     @app.route("/habits/<int:habit_id>/delete", methods=["POST"])
+    @login_required
     def habits_delete(habit_id: int):
-        chat_id = request.form.get("chat", type=int)
+        user_id = session.get("user_id")
         conn = _connect(app.config["DB_PATH"])
         try:
             _ensure_habit_tables(conn)
-            conn.execute("DELETE FROM habit_completions WHERE habit_id = ?", (habit_id,))
-            conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
-            conn.commit()
+            # Verify ownership
+            habit = conn.execute(
+                "SELECT id FROM habits WHERE id = ? AND user_id = ?",
+                (habit_id, user_id)
+            ).fetchone()
+            if habit:
+                conn.execute("DELETE FROM habit_completions WHERE habit_id = ?", (habit_id,))
+                conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
+                conn.commit()
         finally:
             conn.close()
-        return redirect(url_for("habits", chat=chat_id))
+        return redirect(url_for("habits"))
 
     @app.route("/api/habits/<int:habit_id>/toggle", methods=["POST"])
+    @login_required
     def api_habit_toggle(habit_id: int):
+        user_id = session.get("user_id")
         conn = _connect(app.config["DB_PATH"])
         try:
             _ensure_habit_tables(conn)
+            # Verify ownership
             owner = conn.execute(
-                "SELECT id FROM habits WHERE id = ?", (habit_id,)
+                "SELECT id FROM habits WHERE id = ? AND user_id = ?", (habit_id, user_id)
             ).fetchone()
             if owner is None:
                 return jsonify({"error": "not found"}), 404
@@ -484,7 +615,9 @@ def create_app(db_path: Path | None = None) -> Flask:
             conn.close()
 
     @app.route("/api/todos/<int:todo_id>/status", methods=["POST"])
+    @login_required
     def api_set_status(todo_id: int):
+        user_id = session.get("user_id")
         payload = request.get_json(silent=True) or {}
         status = payload.get("status")
         if status not in VALID_STATUSES:
@@ -492,10 +625,11 @@ def create_app(db_path: Path | None = None) -> Flask:
         conn = _connect(app.config["DB_PATH"])
         try:
             _ensure_status_column(conn)
+            _ensure_user_scoped_data(conn)
             done_flag = 1 if status == "done" else 0
             cur = conn.execute(
-                "UPDATE todos SET status = ?, done = ? WHERE id = ?",
-                (status, done_flag, todo_id),
+                "UPDATE todos SET status = ?, done = ? WHERE id = ? AND user_id = ?",
+                (status, done_flag, todo_id, user_id),
             )
             conn.commit()
             if cur.rowcount == 0:

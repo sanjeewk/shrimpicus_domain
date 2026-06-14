@@ -1,0 +1,463 @@
+/* Habits page - 3-column layout inspired by modern habit tracker UI */
+
+.habits-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr 240px;
+  gap: 24px;
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  height: calc(100vh - 80px);
+}
+
+/* ===== LEFT: CALENDAR SIDEBAR ===== */
+.habits-calendar {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  overflow-y: auto;
+}
+
+.calendar-header {
+  margin-bottom: 16px;
+}
+
+.calendar-month {
+  font-family: var(--font-retro);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+
+.calendar-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-days-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.calendar-day-label {
+  font-family: var(--font-retro);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.calendar-dates {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.calendar-date {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 8px;
+  position: relative;
+  font-family: var(--font-retro);
+  font-size: 12px;
+  color: var(--ink);
+  transition: background 100ms;
+}
+
+.calendar-date.is-outside {
+  opacity: 0.3;
+}
+
+.calendar-date.is-today {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.date-num {
+  font-size: 11px;
+}
+
+.date-dots {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  min-height: 8px;
+}
+
+.date-dots .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  display: block;
+}
+
+/* ===== CENTER: MAIN HABITS LIST ===== */
+.habits-main {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.habits-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.habits-title {
+  font-family: var(--font-retro);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
+.habits-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-retro);
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.habits-filter select {
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--font-retro);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Add habit form */
+.habit-add-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.habit-input {
+  flex: 1;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: var(--font-retro);
+  font-size: 14px;
+  transition: all 120ms;
+}
+
+.habit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.habit-input::placeholder {
+  color: var(--ink-faint);
+}
+
+.habit-goal-select {
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-family: var(--font-retro);
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 90px;
+}
+
+.habit-add-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-family: var(--font-retro);
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 120ms;
+}
+
+.habit-add-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.habit-add-btn:active {
+  transform: translateY(0);
+}
+
+/* Habit list */
+.habit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.habit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface-2);
+  border-radius: 12px;
+  border: 2px solid transparent;
+  transition: all 120ms;
+  position: relative;
+}
+
+.habit-row:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.habit-row.goal-met {
+  border-color: var(--done);
+  background: rgba(66, 211, 146, 0.05);
+}
+
+.habit-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.habit-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.habit-name {
+  font-family: var(--font-retro);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.habit-row.goal-met .habit-name {
+  color: var(--done);
+}
+
+.habit-goal {
+  font-family: var(--font-retro);
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.habit-week {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.habit-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 80ms;
+}
+
+.habit-day:hover {
+  transform: translateY(-2px);
+}
+
+.habit-day:active {
+  transform: scale(0.95);
+}
+
+.day-label {
+  font-family: var(--font-retro);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+
+.habit-day.is-today .day-label {
+  color: var(--accent);
+}
+
+.day-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: var(--surface);
+  display: block;
+  transition: all 120ms;
+  position: relative;
+}
+
+.habit-day:hover .day-circle {
+  border-color: var(--done);
+}
+
+.habit-day.is-checked .day-circle {
+  background: var(--habit-color, var(--done));
+  border-color: var(--habit-color, var(--done));
+}
+
+.habit-day.is-checked .day-circle::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.habit-day.is-today .day-circle {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.habit-delete {
+  background: transparent;
+  border: none;
+  color: var(--ink-faint);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color 120ms;
+  flex-shrink: 0;
+}
+
+.habit-delete:hover {
+  color: var(--accent);
+}
+
+/* Empty state */
+.habits-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--ink-faint);
+  font-family: var(--font-retro);
+  font-size: 14px;
+}
+
+/* ===== RIGHT: STATS SIDEBAR ===== */
+.habits-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stat-box {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  transition: transform 120ms;
+}
+
+.stat-box:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-label {
+  font-family: var(--font-retro);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-family: var(--font-retro);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .habits-layout {
+    grid-template-columns: 240px 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .habits-stats {
+    grid-column: 1 / -1;
+    flex-direction: row;
+  }
+
+  .stat-box {
+    flex: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  .habits-layout {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 16px;
+  }
+
+  .habits-calendar {
+    order: 2;
+  }
+
+  .habits-main {
+    order: 1;
+  }
+
+  .habits-stats {
+    order: 3;
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

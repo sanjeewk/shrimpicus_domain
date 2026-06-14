@@ -50,37 +50,49 @@ class Database:
             CREATE TABLE IF NOT EXISTS todos (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               chat_id INTEGER NOT NULL,
+              user_id INTEGER,
               task TEXT NOT NULL,
               category TEXT NOT NULL DEFAULT 'General',
               status TEXT NOT NULL DEFAULT 'to_do',
               done INTEGER NOT NULL DEFAULT 0,
               notion_page_id TEXT,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id);
 
             CREATE TABLE IF NOT EXISTS birthdays (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               chat_id INTEGER NOT NULL,
+              user_id INTEGER,
               person_name TEXT NOT NULL,
               date_ymd TEXT NOT NULL,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS journal_entries (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               chat_id INTEGER NOT NULL,
+              user_id INTEGER,
               content TEXT NOT NULL,
               file_path TEXT,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS habits (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               chat_id INTEGER NOT NULL,
+              user_id INTEGER,
               name TEXT NOT NULL,
               weekly_goal INTEGER NOT NULL DEFAULT 7,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id);
 
             CREATE TABLE IF NOT EXISTS habit_completions (
               id INTEGER PRIMARY KEY AUTOINCREMENT,

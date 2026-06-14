@@ -3,17 +3,6 @@
 
 {% block content %}
 <section class="board-toolbar">
-  <form class="board-toolbar__filter" method="get" action="{{ url_for('board') }}">
-    <label class="board-toolbar__label" for="chat">Chat</label>
-    <select id="chat" name="chat" onchange="this.form.submit()">
-      <option value="">All chats</option>
-      {% for c in chats %}
-      <option value="{{ c.id }}" {% if selected_chat == c.id %}selected{% endif %}>
-        Chat {{ c.id }} · {{ c.n }}
-      </option>
-      {% endfor %}
-    </select>
-  </form>
   <div class="board-toolbar__counts">
     <span class="pill pill--todo">To do · {{ columns.to_do|length }}</span>
     <span class="pill pill--doing">Doing · {{ columns.doing|length }}</span>
