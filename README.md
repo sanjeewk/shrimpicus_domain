@@ -119,6 +119,20 @@ The Discord bot sends a notification to the shared channel celebrating their pro
 
 Existing todos, reminders, habits, and other data automatically belong to **User ID 1** (the default user). Create that account first to access your existing data, or your data will be isolated until you log in as user 1.
 
+## Screenshots
+
+### Login Page
+![Login](docs/screenshots/login.png)
+
+### Board (Kanban View)
+![Board](docs/screenshots/board.png)
+
+### Habits Tracker
+![Habits](docs/screenshots/habits.png)
+
+### Social Page
+![Social](docs/screenshots/social.png)
+
 ## Changelog
 
 ### Unreleased
