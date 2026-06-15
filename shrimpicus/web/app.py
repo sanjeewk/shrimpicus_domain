@@ -116,8 +116,18 @@ def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
           FOREIGN KEY (group_id) REFERENCES groups(id),
           FOREIGN KEY (user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS friendships (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          friend_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(user_id, friend_id),
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (friend_id) REFERENCES users(id)
+        );
         CREATE INDEX IF NOT EXISTS idx_username ON users(username);
         CREATE INDEX IF NOT EXISTS idx_group_members ON group_members(group_id, user_id);
+        CREATE INDEX IF NOT EXISTS idx_friendships ON friendships(user_id, friend_id);
         """
     )
     conn.commit()
@@ -643,6 +653,7 @@ def create_app(db_path: Path | None = None) -> Flask:
     def social():
         conn = _connect(app.config["DB_PATH"])
         try:
+            _ensure_auth_tables(conn)
             user_id = session["user_id"]
 
             # Get user's groups
