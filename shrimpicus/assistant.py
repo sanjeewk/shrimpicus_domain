@@ -65,12 +65,18 @@ class AssistantService:
         self.ollama = ollama
         self.bot = bot
 
+        # Use default_user_id as chat_id for all Discord operations
+        # This maps Discord activity to a specific user account (psyduck = 2)
+        self.default_chat_id = settings.default_user_id
+
     def add_reminder_minutes(self, chat_id: int, minutes: int, content: str, poll_required: bool = True) -> int:
         due_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-        return self.db.add_reminder(chat_id, content.strip(), due_at.isoformat(), poll_required=poll_required)
+        # Use default_chat_id (user_id) instead of Discord chat_id
+        return self.db.add_reminder(self.default_chat_id, content.strip(), due_at.isoformat(), poll_required=poll_required)
 
     def list_reminders_text(self, chat_id: int) -> str:
-        reminders = self.db.list_reminders(chat_id)
+        # Use default_chat_id (user_id) instead of Discord chat_id
+        reminders = self.db.list_reminders(self.default_chat_id)
         if not reminders:
             return "No reminders yet."
         lines = []
@@ -93,13 +99,13 @@ class AssistantService:
         else:
             err = ""
 
-        todo_id = self.db.add_todo(chat_id, task, category=category, notion_page_id=notion_page_id)
+        todo_id = self.db.add_todo(self.default_chat_id, task, category=category, notion_page_id=notion_page_id)
         if notion_page_id:
             return f"Todo #{todo_id} [{category}] added and synced to Notion. {err}".strip()
         return f"Todo #{todo_id} [{category}] added. {err}".strip()
 
     def list_todos_text(self, chat_id: int) -> str:
-        rows = self.db.list_todos(chat_id, include_done=False)
+        rows = self.db.list_todos(self.default_chat_id, include_done=False)
         if not rows:
             return "No open todos."
         grouped: dict[str, list[str]] = {c: [] for c in TODO_CATEGORIES}
@@ -128,25 +134,25 @@ class AssistantService:
 
     def add_birthday(self, chat_id: int, person_name: str, date_text: str) -> str:
         dt = dt_parser.parse(date_text).date()
-        birthday_id = self.db.add_birthday(chat_id, person_name.strip(), dt.isoformat())
+        birthday_id = self.db.add_birthday(self.default_chat_id, person_name.strip(), dt.isoformat())
         return f"Birthday #{birthday_id} saved for {person_name.strip()} on {dt.isoformat()}."
 
     def list_birthdays_text(self, chat_id: int) -> str:
-        rows = self.db.list_birthdays(chat_id)
+        rows = self.db.list_birthdays(self.default_chat_id)
         if not rows:
             return "No birthdays saved."
         return "\n".join([f"#{r['id']} {r['person_name']} - {r['date_ymd']}" for r in rows])
 
     def journal(self, chat_id: int, content: str) -> str:
         file_path = self.journal.append(content)
-        self.db.add_journal_entry(chat_id, content, file_path)
+        self.db.add_journal_entry(self.default_chat_id, content, file_path)
         if file_path:
             return f"Journal saved to {file_path}."
         return "Journal saved in database. Set OBSIDIAN_VAULT_PATH to write files."
 
     # --- habits ------------------------------------------------------------- #
     def list_habits_text(self, chat_id: int) -> str:
-        rows = self.db.list_habits(chat_id)
+        rows = self.db.list_habits(self.default_chat_id)
         if not rows:
             return "No habits tracked yet."
         today = datetime.now(timezone.utc).date().isoformat()
@@ -161,12 +167,12 @@ class AssistantService:
         name_or_id = str(name_or_id).strip()
         if not name_or_id:
             return "Which habit? Give a name or id."
-        habit = self.db.find_habit(chat_id, name_or_id)
+        habit = self.db.find_habit(self.default_chat_id, name_or_id)
         if habit is None:
             # auto-create by name so "I went to the gym" just works
             if name_or_id.lstrip("#").isdigit():
                 return f"No habit #{name_or_id.lstrip('#')} found."
-            habit_id = self.db.add_habit(chat_id, name_or_id)
+            habit_id = self.db.add_habit(self.default_chat_id, name_or_id)
             name = name_or_id
         else:
             habit_id = habit["id"]

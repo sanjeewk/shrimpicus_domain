@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     mcp_chat_id: int = 0
 
+    # Default user ID for Discord bot operations (maps to users table)
+    default_user_id: int = 2
+
     # Production settings
     web_host: str = "127.0.0.1"
     web_port: int = 5005
