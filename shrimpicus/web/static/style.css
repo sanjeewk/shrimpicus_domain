@@ -119,6 +119,61 @@ body { -webkit-font-smoothing: antialiased; }
   gap: 16px;
   margin-bottom: 20px;
 }
+
+.todo-add-form {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  max-width: 500px;
+}
+
+.todo-input {
+  flex: 1;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-family: var(--font-retro);
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.todo-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.todo-input::placeholder {
+  color: var(--ink-faint);
+}
+
+.todo-add-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  width: 40px;
+  height: 40px;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.todo-add-btn:hover {
+  background: var(--accent-dark);
+  transform: scale(1.05);
+}
+
+.todo-add-btn:active {
+  transform: scale(0.98);
+}
+
 .board-toolbar__filter { display: flex; align-items: center; gap: 10px; }
 .board-toolbar__label {
   font-family: var(--font-pixel);
