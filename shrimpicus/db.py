@@ -466,9 +466,8 @@ class Database:
             WHERE chat_id = ?
             ORDER BY due_at ASC
             LIMIT ?
-            """,
-            (chat_id, limit),
-        ).fetchall()
+        """)
+        rows = cur.execute(query, (chat_id, limit)).fetchall()
         return [
             Reminder(
                 id=row["id"],
