@@ -792,11 +792,11 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
         try:
             user_id = session["user_id"]
             cur = conn.execute(
-                "INSERT INTO groups(name, created_by_user_id, created_at) VALUES (?, ?, ?)",
+                "INSERT INTO groups(name, owner_id, created_at) VALUES (?, ?, ?)",
                 (name, user_id, datetime.now(timezone.utc).isoformat()),
             )
             group_id = cur.lastrowid
-            # Auto-add creator
+            # Auto-add creator as member
             conn.execute(
                 "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
                 (group_id, user_id, datetime.now(timezone.utc).isoformat()),
