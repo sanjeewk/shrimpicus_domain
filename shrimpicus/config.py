@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:7b-instruct-q4_K_M"
 
+    # LLM provider: "ollama" (local) or "groq" (hosted)
+    llm_provider: str = "ollama"
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.1-8b-instant"
+
     whisper_enabled: bool = True
     whisper_model: str = "base"
 

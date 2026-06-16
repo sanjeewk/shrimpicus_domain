@@ -3,6 +3,11 @@
 
 {% block content %}
 <section class="board-toolbar">
+  <form class="todo-add-form" method="post" action="{{ url_for('todos_add') }}">
+    <input class="todo-input" type="text" name="task" maxlength="500"
+           placeholder="Add a new todo..." autocomplete="off" required>
+    <button class="todo-add-btn" type="submit">+</button>
+  </form>
   <div class="board-toolbar__counts">
     <span class="pill pill--todo">To do · {{ columns.to_do|length }}</span>
     <span class="pill pill--doing">Doing · {{ columns.doing|length }}</span>

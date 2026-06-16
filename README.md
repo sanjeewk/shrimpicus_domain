@@ -137,6 +137,7 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 ### Unreleased
 
+- **Groq API support** — use hosted Llama 3.1 8B instead of local Ollama for faster inference (100-300ms vs 2-5s) and lower server requirements. Free tier supports 14,400 requests/day. Set `LLM_PROVIDER=groq` and `GROQ_API_KEY` in `.env` to enable. All RAG and tool calling features work with both providers.
 - **PostgreSQL support for production** — database layer now supports both SQLite (local development) and PostgreSQL (production hosting). Set `DATABASE_URL` in `.env` to use PostgreSQL. Migration script included (`migrate_to_postgres.py`) to transfer existing SQLite data to PostgreSQL.
 - **Production deployment preparation** — added `psycopg2-binary` and `gunicorn` dependencies, created `.env.production.example` template, added `shrimpicus-bot` entrypoint alias. See `DEPLOYMENT_PLAN.md` for full hosting guide.
 - **Social features with multi-user authentication** — user accounts with username/password (argon2 hashing), login/signup pages, session management. Create groups (max 10 members), add friends, and view real-time stats (todos done, habits logged) for each group member.

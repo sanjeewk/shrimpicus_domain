@@ -438,6 +438,28 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
         finally:
             conn.close()
 
+    @app.route("/todos/add", methods=["POST"])
+    @login_required
+    def todos_add():
+        user_id = session.get("user_id")
+        task = (request.form.get("task") or "").strip()
+
+        if not task:
+            return redirect(url_for("board"))
+
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            _ensure_status_column(conn)
+            _ensure_user_scoped_data(conn)
+            conn.execute(
+                "INSERT INTO todos(user_id, chat_id, task, category, status, done, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, 0, task[:500], "General", "to_do", 0, datetime.now(timezone.utc).isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return redirect(url_for("board"))
+
     @app.route("/field")
     def field():
         conn = _connect(app.config["DB_PATH"])
