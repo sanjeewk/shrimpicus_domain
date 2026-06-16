@@ -157,6 +157,7 @@ class OllamaClient:
                 result["tool_calls"] = []
                 for tc in message.tool_calls:
                     result["tool_calls"].append({
+                        "id": tc.id,  # Store tool_call_id for response
                         "function": {
                             "name": tc.function.name,
                             "arguments": tc.function.arguments,

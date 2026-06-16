@@ -261,7 +261,19 @@ class AssistantService:
                     except json.JSONDecodeError:
                         args = {}
                 result = await tools_mod.dispatch(self, chat_id, name, args)
-                messages.append({"role": "tool", "name": name, "content": result})
+
+                # Build tool response message
+                tool_msg = {"role": "tool", "content": result}
+
+                # Include tool_call_id if present (required by OpenRouter/OpenAI)
+                tool_call_id = call.get("id")
+                if tool_call_id:
+                    tool_msg["tool_call_id"] = tool_call_id
+                else:
+                    # Fallback for Ollama which may not have id
+                    tool_msg["name"] = name
+
+                messages.append(tool_msg)
 
         # Ran out of steps mid-loop; surface whatever the last tool said.
         for m in reversed(messages):
