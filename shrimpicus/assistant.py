@@ -249,7 +249,14 @@ class AssistantService:
                 return content or None
 
             used_a_tool = True
-            messages.append(msg)  # echo the assistant turn that requested the tools
+
+            # Echo the assistant turn that requested the tools
+            # OpenRouter requires content field even if empty
+            assistant_msg = dict(msg)
+            if "content" not in assistant_msg or assistant_msg["content"] is None:
+                assistant_msg["content"] = ""
+            messages.append(assistant_msg)
+
             for call in tool_calls:
                 fn = call.get("function", {})
                 name = fn.get("name", "")
