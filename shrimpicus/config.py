@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:7b-instruct-q4_K_M"
 
-    # LLM provider: "ollama" (local) or "groq" (hosted)
+    # LLM provider: "ollama" (local) or "openrouter" (hosted)
     llm_provider: str = "ollama"
-    groq_api_key: str = ""
-    groq_model: str = "llama-3.1-8b-instant"
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-4o-mini"
 
     whisper_enabled: bool = True
     whisper_model: str = "base"

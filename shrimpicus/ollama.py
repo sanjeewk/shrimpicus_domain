@@ -1,36 +1,41 @@
 from __future__ import annotations
 
 import httpx
+import json
 
 from shrimpicus.config import Settings
 
-# Try to import Groq, but don't fail if not installed
+# Try to import OpenAI SDK (used for OpenRouter), but don't fail if not installed
 try:
-    from groq import Groq
-    HAS_GROQ = True
+    from openai import OpenAI
+    HAS_OPENAI = True
 except ImportError:
-    HAS_GROQ = False
+    HAS_OPENAI = False
 
 
 class OllamaClient:
-    """LLM client supporting both local Ollama and hosted Groq."""
+    """LLM client supporting both local Ollama and hosted OpenRouter."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.provider = settings.llm_provider.lower()
 
-        if self.provider == "groq":
-            if not HAS_GROQ:
+        if self.provider == "openrouter":
+            if not HAS_OPENAI:
                 raise RuntimeError(
-                    "Groq provider selected but groq package not installed. "
-                    "Install with: pip install groq"
+                    "OpenRouter provider selected but openai package not installed. "
+                    "Install with: pip install openai"
                 )
-            if not settings.groq_api_key:
+            if not settings.openrouter_api_key:
                 raise RuntimeError(
-                    "Groq provider selected but GROQ_API_KEY not set in .env"
+                    "OpenRouter provider selected but OPENROUTER_API_KEY not set in .env"
                 )
-            self.groq_client = Groq(api_key=settings.groq_api_key)
-            self.groq_model = settings.groq_model
+            # OpenRouter uses OpenAI SDK with custom base URL
+            self.openrouter_client = OpenAI(
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1"
+            )
+            self.openrouter_model = settings.openrouter_model
         else:
             # Local Ollama
             self.base_url = settings.ollama_base_url.rstrip("/")
@@ -45,8 +50,8 @@ class OllamaClient:
             "slash commands, mention the command format."
         )
 
-        if self.provider == "groq":
-            return await self._groq_answer(user_text, system_prompt)
+        if self.provider == "openrouter":
+            return await self._openrouter_answer(user_text, system_prompt)
         else:
             return await self._ollama_answer(user_text, system_prompt)
 
@@ -66,11 +71,11 @@ class OllamaClient:
             data = resp.json()
         return data.get("message", {}).get("content", "").strip() or "I could not generate a response."
 
-    async def _groq_answer(self, user_text: str, system_prompt: str) -> str:
-        """Groq implementation of answer()."""
+    async def _openrouter_answer(self, user_text: str, system_prompt: str) -> str:
+        """OpenRouter implementation of answer()."""
         try:
-            response = self.groq_client.chat.completions.create(
-                model=self.groq_model,
+            response = self.openrouter_client.chat.completions.create(
+                model=self.openrouter_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_text},
@@ -80,7 +85,7 @@ class OllamaClient:
             )
             return response.choices[0].message.content.strip() or "I could not generate a response."
         except Exception as e:
-            return f"Groq API error: {e}"
+            return f"OpenRouter API error: {e}"
 
     async def chat(
         self,
@@ -93,8 +98,8 @@ class OllamaClient:
         ``tool_calls`` (the model asking to run a tool). Used by the agentic
         loop in AssistantService.
         """
-        if self.provider == "groq":
-            return await self._groq_chat(messages, tools)
+        if self.provider == "openrouter":
+            return await self._openrouter_chat(messages, tools)
         else:
             return await self._ollama_chat(messages, tools)
 
@@ -113,13 +118,13 @@ class OllamaClient:
             data = resp.json()
         return data.get("message", {}) or {}
 
-    async def _groq_chat(self, messages: list[dict], tools: list[dict] | None) -> dict:
-        """Groq implementation of chat() with tool calling support."""
+    async def _openrouter_chat(self, messages: list[dict], tools: list[dict] | None) -> dict:
+        """OpenRouter implementation of chat() with tool calling support."""
         try:
-            # Convert shrimpicus tool format to Groq format
-            groq_tools = None
+            # Convert shrimpicus tool format to OpenAI/OpenRouter format
+            openrouter_tools = None
             if tools:
-                groq_tools = [
+                openrouter_tools = [
                     {
                         "type": "function",
                         "function": {
@@ -131,24 +136,24 @@ class OllamaClient:
                     for tool in tools
                 ]
 
-            response = self.groq_client.chat.completions.create(
-                model=self.groq_model,
+            response = self.openrouter_client.chat.completions.create(
+                model=self.openrouter_model,
                 messages=messages,
-                tools=groq_tools,
+                tools=openrouter_tools,
                 temperature=0.7,
                 max_tokens=1024,
             )
 
             message = response.choices[0].message
 
-            # Convert Groq response back to shrimpicus format (Ollama-like)
+            # Convert OpenRouter response back to shrimpicus format (Ollama-like)
             result = {}
 
             if message.content:
                 result["content"] = message.content
 
             if message.tool_calls:
-                # Convert Groq tool_calls to Ollama format
+                # Convert OpenAI-style tool_calls to Ollama format
                 result["tool_calls"] = []
                 for tc in message.tool_calls:
                     result["tool_calls"].append({
@@ -161,5 +166,5 @@ class OllamaClient:
             return result
 
         except Exception as e:
-            # Return error in content if Groq fails
-            return {"content": f"Groq API error: {e}"}
+            # Return error in content if OpenRouter fails
+            return {"content": f"OpenRouter API error: {e}"}
