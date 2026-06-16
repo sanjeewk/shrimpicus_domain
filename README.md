@@ -137,6 +137,8 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 ### Unreleased
 
+- **PostgreSQL support for production** — database layer now supports both SQLite (local development) and PostgreSQL (production hosting). Set `DATABASE_URL` in `.env` to use PostgreSQL. Migration script included (`migrate_to_postgres.py`) to transfer existing SQLite data to PostgreSQL.
+- **Production deployment preparation** — added `psycopg2-binary` and `gunicorn` dependencies, created `.env.production.example` template, added `shrimpicus-bot` entrypoint alias. See `DEPLOYMENT_PLAN.md` for full hosting guide.
 - **Social features with multi-user authentication** — user accounts with username/password (argon2 hashing), login/signup pages, session management. Create groups (max 10 members), add friends, and view real-time stats (todos done, habits logged) for each group member.
 - **Group notifications** — Discord bot notifies groups when members complete all their daily todos or complete 2+ todos in one day. Notifications appear in the shared Discord channel with group context.
 - **Multi-user data model** — all entities (todos, reminders, habits, birthdays, journal) now scoped to `user_id`. Existing data migrates to default user (ID 1) automatically.

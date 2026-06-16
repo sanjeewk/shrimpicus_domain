@@ -4,6 +4,15 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+# Try to import psycopg2, fall back to None if not available
+try:
+    import psycopg2
+    import psycopg2.extras
+    HAS_POSTGRES = True
+except ImportError:
+    HAS_POSTGRES = False
 
 
 def utc_now_iso() -> str:
@@ -22,12 +31,60 @@ class Reminder:
 
 
 class Database:
-    def __init__(self, db_path: Path):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+    def __init__(self, db_path: Path | None = None, database_url: str | None = None):
+        """Initialize database connection.
+
+        Args:
+            db_path: Path to SQLite database file (used if database_url is not set)
+            database_url: PostgreSQL connection string (takes precedence over db_path)
+        """
+        self.is_postgres = False
+        self.conn = None
+
+        if database_url and database_url.startswith('postgresql://'):
+            if not HAS_POSTGRES:
+                raise RuntimeError(
+                    "PostgreSQL support requires psycopg2-binary. "
+                    "Install with: pip install psycopg2-binary"
+                )
+            self.is_postgres = True
+            self.conn = psycopg2.connect(database_url)
+            self.conn.autocommit = False
+            # Use RealDictRow for psycopg2 to match sqlite3.Row behavior
+            import psycopg2.extras
+            self.cursor_factory = psycopg2.extras.RealDictCursor
+        else:
+            # Fall back to SQLite
+            if db_path is None:
+                raise ValueError("Either db_path or database_url must be provided")
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(db_path, check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+            self.cursor_factory = None
+
+    def _get_cursor(self):
+        """Get a cursor with the appropriate factory."""
+        if self.is_postgres:
+            return self.conn.cursor(cursor_factory=self.cursor_factory)
+        return self.conn.cursor()
+
+    def _param(self, query: str) -> str:
+        """Convert SQLite placeholders (?) to PostgreSQL (%s) if needed."""
+        if self.is_postgres:
+            return query.replace('?', '%s')
+        return query
 
     def init(self) -> None:
+        """Initialize database schema. Handles both SQLite and PostgreSQL."""
+        if self.is_postgres:
+            self._init_postgres()
+        else:
+            self._init_sqlite()
+        self._migrate()
+        self.conn.commit()
+
+    def _init_sqlite(self) -> None:
+        """Initialize SQLite schema."""
         self.conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS reminders (
@@ -160,10 +217,191 @@ class Database:
               ON friendships(friend_id);
             """
         )
-        self._migrate()
-        self.conn.commit()
+
+    def _init_postgres(self) -> None:
+        """Initialize PostgreSQL schema."""
+        cur = self._get_cursor()
+
+        # PostgreSQL uses SERIAL instead of AUTOINCREMENT, and different syntax
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+              id SERIAL PRIMARY KEY,
+              chat_id INTEGER NOT NULL,
+              content TEXT NOT NULL,
+              due_at TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              poll_required INTEGER NOT NULL DEFAULT 1,
+              poll_id TEXT,
+              created_at TEXT NOT NULL,
+              completed_at TEXT,
+              user_id INTEGER DEFAULT 1
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_due_status
+              ON reminders(due_at, status);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_poll
+              ON reminders(poll_id);
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+              id SERIAL PRIMARY KEY,
+              username TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_users_username
+              ON users(LOWER(username));
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS todos (
+              id SERIAL PRIMARY KEY,
+              chat_id INTEGER NOT NULL,
+              user_id INTEGER,
+              task TEXT NOT NULL,
+              category TEXT NOT NULL DEFAULT 'General',
+              status TEXT NOT NULL DEFAULT 'to_do',
+              done INTEGER NOT NULL DEFAULT 0,
+              notion_page_id TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id);
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS birthdays (
+              id SERIAL PRIMARY KEY,
+              chat_id INTEGER NOT NULL,
+              user_id INTEGER,
+              person_name TEXT NOT NULL,
+              date_ymd TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS journal_entries (
+              id SERIAL PRIMARY KEY,
+              chat_id INTEGER NOT NULL,
+              user_id INTEGER,
+              content TEXT NOT NULL,
+              file_path TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS habits (
+              id SERIAL PRIMARY KEY,
+              chat_id INTEGER NOT NULL,
+              user_id INTEGER,
+              name TEXT NOT NULL,
+              weekly_goal INTEGER NOT NULL DEFAULT 7,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id);
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS habit_completions (
+              id SERIAL PRIMARY KEY,
+              habit_id INTEGER NOT NULL,
+              date_ymd TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              UNIQUE(habit_id, date_ymd),
+              FOREIGN KEY(habit_id) REFERENCES habits(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_habit_completions
+              ON habit_completions(habit_id, date_ymd);
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS meta (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS groups (
+              id SERIAL PRIMARY KEY,
+              name TEXT NOT NULL,
+              created_by_user_id INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS group_members (
+              id SERIAL PRIMARY KEY,
+              group_id INTEGER NOT NULL,
+              user_id INTEGER NOT NULL,
+              joined_at TEXT NOT NULL,
+              UNIQUE(group_id, user_id),
+              FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_group_members_group
+              ON group_members(group_id);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_group_members_user
+              ON group_members(user_id);
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS friendships (
+              id SERIAL PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              friend_id INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              UNIQUE(user_id, friend_id),
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+              FOREIGN KEY(friend_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_friendships_user
+              ON friendships(user_id);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_friendships_friend
+              ON friendships(friend_id);
+        """)
+
+        cur.close()
 
     def _migrate(self) -> None:
+        """Run migrations for SQLite only. PostgreSQL schema is created with all columns."""
+        if self.is_postgres:
+            return  # PostgreSQL schema is already complete
+
         # Todos migration
         cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(todos)").fetchall()}
         if "category" not in cols:
@@ -201,19 +439,28 @@ class Database:
             self.conn.execute("ALTER TABLE journal_entries ADD COLUMN user_id INTEGER DEFAULT 1")
 
     def add_reminder(self, chat_id: int, content: str, due_at_iso: str, poll_required: bool = True) -> int:
-        cur = self.conn.execute(
-            """
+        cur = self._get_cursor()
+        query = self._param("""
             INSERT INTO reminders(chat_id, content, due_at, status, poll_required, created_at)
             VALUES (?, ?, ?, 'pending', ?, ?)
-            """,
-            (chat_id, content, due_at_iso, 1 if poll_required else 0, utc_now_iso()),
-        )
+        """)
+        cur.execute(query, (chat_id, content, due_at_iso, 1 if poll_required else 0, utc_now_iso()))
         self.conn.commit()
-        return int(cur.lastrowid)
+
+        if self.is_postgres:
+            # PostgreSQL requires RETURNING to get the ID
+            cur.execute("SELECT lastval()")
+            row_id = cur.fetchone()[0]
+            cur.close()
+            return int(row_id)
+        else:
+            row_id = cur.lastrowid
+            cur.close()
+            return int(row_id)
 
     def list_reminders(self, chat_id: int, limit: int = 20) -> list[Reminder]:
-        rows = self.conn.execute(
-            """
+        cur = self._get_cursor()
+        query = self._param("""
             SELECT id, chat_id, content, due_at, status, poll_required, poll_id
             FROM reminders
             WHERE chat_id = ?

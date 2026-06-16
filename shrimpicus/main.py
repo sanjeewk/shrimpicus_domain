@@ -39,7 +39,7 @@ async def run() -> None:
             )
         raise SystemExit(2) from exc
 
-    db = Database(settings.db_file)
+    db = Database(db_path=settings.db_file, database_url=settings.database_url or None)
     db.init()
 
     notion = NotionService(settings)

@@ -12,6 +12,8 @@ dependencies = [
   "python-dateutil>=2.9.0",
   "flask>=3.0.0",
   "argon2-cffi>=25.0.0",
+  "psycopg2-binary>=2.9.9",
+  "gunicorn>=21.2.0",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +26,7 @@ mcp = [
 
 [project.scripts]
 shrimpicus = "shrimpicus.main:main"
+shrimpicus-bot = "shrimpicus.main:main"
 shrimpicus-web = "shrimpicus.web.app:main"
 shrimpicus-mcp = "shrimpicus.mcp_server:main"
 

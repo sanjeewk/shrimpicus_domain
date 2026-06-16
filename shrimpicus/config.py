@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     tz: str = "UTC"
     db_path: str = "./data/shrimpicus.db"
+    database_url: str = ""  # PostgreSQL connection string (if set, overrides SQLite)
     check_interval_seconds: int = 30
     default_snooze_minutes: int = 30
 
@@ -31,6 +32,11 @@ class Settings(BaseSettings):
     obsidian_journal_relative: str = "Journal/inbox.md"
 
     mcp_chat_id: int = 0
+
+    # Production settings
+    web_host: str = "127.0.0.1"
+    web_port: int = 5005
+    secret_key: str = ""  # Flask secret key for sessions
 
     model_config = SettingsConfigDict(env_file=str(DEFAULT_ENV_FILE), env_file_encoding="utf-8")
 

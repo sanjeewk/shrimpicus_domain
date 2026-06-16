@@ -11,17 +11,34 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, ses
 
 from shrimpicus import auth as auth_utils
 from shrimpicus.config import Settings
+from shrimpicus.db import Database
 
 
 VALID_STATUSES = ("to_do", "doing", "done")
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
-    if not db_path.exists():
-        abort(503, description=f"Database not found at {db_path}. Run shrimpicus first.")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _connect(db_path: Path, database_url: str = "") -> sqlite3.Connection:
+    """Connect to database. Uses Database class for compatibility but returns raw connection."""
+    if database_url and database_url.startswith('postgresql://'):
+        # For PostgreSQL, we need to use the Database class wrapper
+        # This is a temporary solution - ideally web app should use Database class throughout
+        try:
+            import psycopg2
+            import psycopg2.extras
+            conn = psycopg2.connect(database_url)
+            conn.autocommit = False
+            # Use RealDictRow for compatibility with sqlite3.Row
+            def dict_row_factory(cursor):
+                cursor.row_factory = psycopg2.extras.RealDictCursor
+            return conn
+        except ImportError:
+            abort(503, description="PostgreSQL support requires psycopg2-binary")
+    else:
+        if not db_path.exists():
+            abort(503, description=f"Database not found at {db_path}. Run shrimpicus first.")
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -277,13 +294,21 @@ def _load_todos(conn: sqlite3.Connection, selected_chat: int | None) -> list[dic
     return todos
 
 
-def create_app(db_path: Path | None = None) -> Flask:
+def create_app(db_path: Path | None = None, database_url: str | None = None) -> Flask:
     settings = Settings() if db_path is None else None
     resolved_db = db_path if db_path is not None else settings.db_file  # type: ignore[union-attr]
+    resolved_db_url = database_url if database_url is not None else (settings.database_url if settings else "")  # type: ignore[union-attr]
 
     app = Flask(__name__)
     app.config["DB_PATH"] = resolved_db
-    app.secret_key = secrets.token_hex(32)  # Generate secure secret key for sessions
+    app.config["DATABASE_URL"] = resolved_db_url
+
+    # Use secret_key from settings if available, otherwise generate one
+    if settings and settings.secret_key:
+        app.secret_key = settings.secret_key
+    else:
+        app.secret_key = secrets.token_hex(32)
+
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 
     @app.route("/")
@@ -302,7 +327,7 @@ def create_app(db_path: Path | None = None) -> Flask:
             if not username or not password:
                 return render_template("login.html", error="Username and password are required.")
 
-            conn = _connect(app.config["DB_PATH"])
+            conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
             try:
                 _ensure_auth_tables(conn)
                 user = conn.execute(
@@ -341,7 +366,7 @@ def create_app(db_path: Path | None = None) -> Flask:
             if password != password_confirm:
                 return render_template("signup.html", error="Passwords do not match.")
 
-            conn = _connect(app.config["DB_PATH"])
+            conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
             try:
                 _ensure_auth_tables(conn)
                 # Check if username already exists
