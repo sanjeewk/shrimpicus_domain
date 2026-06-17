@@ -257,6 +257,22 @@ body { -webkit-font-smoothing: antialiased; }
   border-radius: 999px;
   margin-left: auto;
 }
+.delete-all-btn {
+  background: none;
+  border: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 120ms, color 120ms;
+}
+.delete-all-btn:hover {
+  background: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+}
 
 .column__list {
   list-style: none;
@@ -293,6 +309,31 @@ body { -webkit-font-smoothing: antialiased; }
   font-size: 9px;
   letter-spacing: 1px;
   color: var(--ink-faint);
+}
+.card__delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms;
+}
+.card:hover .card__delete {
+  opacity: 1;
+}
+.card__delete:hover {
+  background: rgba(255, 59, 48, 0.2);
 }
 .card__task {
   font-size: 15px;

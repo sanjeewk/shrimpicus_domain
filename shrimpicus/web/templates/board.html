@@ -22,14 +22,21 @@
       <span class="column__dot" aria-hidden="true"></span>
       <span class="column__title">{{ label }}</span>
       <span class="column__count">{{ columns[status]|length }}</span>
+      {% if status == 'done' and columns[status]|length > 0 %}
+      <button class="delete-all-btn" onclick="deleteAllDone()" title="Delete all completed todos">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+        </svg>
+      </button>
+      {% endif %}
     </div>
     <ul class="column__list" data-status="{{ status }}">
       {% for t in columns[status] %}
       <li class="card" data-id="{{ t.id }}" data-status="{{ t.status }}">
+        <button class="card__delete" onclick="deleteTodo({{ t.id }})" title="Delete todo">×</button>
         <div class="card__id">#{{ "%04d"|format(t.id) }}</div>
         <div class="card__task">{{ t.task }}</div>
         <div class="card__meta">
-          <span class="chip chip--chat">chat {{ t.chat_id }}</span>
           <span class="chip chip--time">{{ t.created_human }}</span>
           {% if t.linked_notion %}<span class="chip chip--notion">notion</span>{% endif %}
         </div>

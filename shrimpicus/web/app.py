@@ -460,6 +460,42 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
             conn.close()
         return redirect(url_for("board"))
 
+    @app.route("/todos/<int:todo_id>/delete", methods=["POST"])
+    @login_required
+    def todos_delete(todo_id: int):
+        user_id = session.get("user_id")
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            # Verify todo belongs to user before deleting
+            todo = conn.execute(
+                "SELECT id FROM todos WHERE id = ? AND user_id = ?",
+                (todo_id, user_id)
+            ).fetchone()
+
+            if not todo:
+                abort(404)
+
+            conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        return "", 204
+
+    @app.route("/todos/delete_all_done", methods=["POST"])
+    @login_required
+    def todos_delete_all_done():
+        user_id = session.get("user_id")
+        conn = _connect(app.config["DB_PATH"])
+        try:
+            conn.execute(
+                "DELETE FROM todos WHERE user_id = ? AND status = 'done'",
+                (user_id,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return "", 204
+
     @app.route("/field")
     def field():
         conn = _connect(app.config["DB_PATH"])

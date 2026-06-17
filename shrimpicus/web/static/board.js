@@ -48,19 +48,59 @@
       const list = col.querySelector(".column__list");
       const count = col.querySelector(".column__count");
       if (list && count) count.textContent = list.children.length;
+      const status = col.className.match(/column--(\w+)/)[1];
+      const pill = document.querySelector(`.pill--${status}`);
+      if (pill) {
+        const label = pill.textContent.split('·')[0].trim();
+        pill.textContent = `${label} · ${list.children.length}`;
+      }
     });
-    const todoCount = document.querySelectorAll('[data-status="to_do"] .card').length
-      || document.querySelectorAll('.column__list[data-status="to_do"] .card').length;
-    const todoPill = document.querySelector(".pill--todo");
-    const doingPill = document.querySelector(".pill--doing");
-    const donePill = document.querySelector(".pill--done");
-    const counts = {
-      to_do: document.querySelector('.column__list[data-status="to_do"]').children.length,
-      doing: document.querySelector('.column__list[data-status="doing"]').children.length,
-      done:  document.querySelector('.column__list[data-status="done"]').children.length,
-    };
-    if (todoPill)  todoPill.textContent  = `To do · ${counts.to_do}`;
-    if (doingPill) doingPill.textContent = `Doing · ${counts.doing}`;
-    if (donePill)  donePill.textContent  = `Done · ${counts.done}`;
   }
+
+  // Expose updateColumnCounts globally for delete functions
+  window.updateColumnCounts = updateColumnCounts;
 })();
+
+// Delete single todo
+async function deleteTodo(id) {
+  if (!confirm('Delete this todo?')) return;
+
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (!card) return;
+
+  card.classList.add('is-saving');
+
+  try {
+    const res = await fetch(`/todos/${id}/delete`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    card.remove();
+    if (window.updateColumnCounts) window.updateColumnCounts();
+  } catch (err) {
+    card.classList.remove('is-saving');
+    card.classList.add('is-error');
+    alert('Failed to delete todo');
+    console.error('Failed to delete todo', err);
+  }
+}
+
+// Delete all completed todos
+async function deleteAllDone() {
+  const doneCards = document.querySelectorAll('.column--done .card');
+  if (doneCards.length === 0) return;
+
+  if (!confirm(`Delete all ${doneCards.length} completed todos?`)) return;
+
+  try {
+    const res = await fetch('/todos/delete_all_done', {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    doneCards.forEach(card => card.remove());
+    if (window.updateColumnCounts) window.updateColumnCounts();
+  } catch (err) {
+    alert('Failed to delete completed todos');
+    console.error('Failed to delete completed todos', err);
+  }
+}
