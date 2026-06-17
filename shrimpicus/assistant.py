@@ -272,6 +272,8 @@ class AssistantService:
                 assistant_msg["content"] = ""
             messages.append(assistant_msg)
 
+            # Deduplicate tool calls - some models make identical duplicate calls
+            seen_calls = {}
             for call in tool_calls:
                 fn = call.get("function", {})
                 name = fn.get("name", "")
@@ -282,6 +284,17 @@ class AssistantService:
                         args = json.loads(args)
                     except json.JSONDecodeError:
                         args = {}
+
+                # Create a signature for deduplication
+                import json
+                call_signature = (name, json.dumps(args, sort_keys=True))
+
+                # Skip if we've already processed this exact call
+                if call_signature in seen_calls:
+                    print(f"[DEBUG] Skipping duplicate call to {name}")
+                    continue
+
+                seen_calls[call_signature] = True
                 result = await tools_mod.dispatch(self, chat_id, name, args)
 
                 # Build tool response message
