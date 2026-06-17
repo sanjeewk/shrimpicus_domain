@@ -237,6 +237,7 @@ class AssistantService:
                     "journal whenever they ask you to add, change, complete, or list "
                     "anything. Do not invent ids — call a list tool first if you need one. "
                     "After acting, confirm briefly in one or two sentences.\n\n"
+                    "IMPORTANT: Only call each tool ONCE. Do not make duplicate tool calls.\n\n"
                     "Here is the user's current data for reference:\n" + context
                 ),
             },
@@ -245,9 +246,17 @@ class AssistantService:
         schemas = tools_mod.ollama_tool_schemas()
 
         used_a_tool = False
-        for _ in range(max_steps):
+        for step in range(max_steps):
             msg = await self.ollama.chat(messages, tools=schemas)
             tool_calls = msg.get("tool_calls") or []
+
+            # Debug logging
+            if tool_calls:
+                print(f"[DEBUG] Step {step}: Model requested {len(tool_calls)} tool call(s)")
+                for i, call in enumerate(tool_calls):
+                    fn = call.get("function", {})
+                    print(f"  Tool {i+1}: {fn.get('name', 'unknown')}")
+
             if not tool_calls:
                 content = (msg.get("content") or "").strip()
                 if used_a_tool:
