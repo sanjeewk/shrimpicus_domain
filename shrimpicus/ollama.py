@@ -83,7 +83,10 @@ class OllamaClient:
                 temperature=0.7,
                 max_tokens=512,
             )
-            return response.choices[0].message.content.strip() or "I could not generate a response."
+            content = response.choices[0].message.content
+            if content:
+                return content.strip() or "I could not generate a response."
+            return "I could not generate a response."
         except Exception as e:
             return f"OpenRouter API error: {e}"
 
@@ -149,6 +152,7 @@ class OllamaClient:
             # Convert OpenRouter response back to shrimpicus format (Ollama-like)
             result = {}
 
+            # Handle content (may be None when tool_calls are present)
             if message.content:
                 result["content"] = message.content
 
