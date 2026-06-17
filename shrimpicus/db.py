@@ -57,6 +57,9 @@ class Database:
             # Fall back to SQLite
             if db_path is None:
                 raise ValueError("Either db_path or database_url must be provided")
+            # Convert string to Path if needed
+            if isinstance(db_path, str):
+                db_path = Path(db_path)
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self.conn = sqlite3.connect(db_path, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
