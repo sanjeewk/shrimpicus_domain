@@ -246,6 +246,9 @@ class AssistantService:
         schemas = tools_mod.ollama_tool_schemas()
 
         used_a_tool = False
+        # Move seen_calls OUTSIDE the loop to persist across all steps
+        seen_calls = {}
+
         for step in range(max_steps):
             msg = await self.ollama.chat(messages, tools=schemas)
             tool_calls = msg.get("tool_calls") or []
@@ -273,7 +276,7 @@ class AssistantService:
             messages.append(assistant_msg)
 
             # Deduplicate tool calls - some models make identical duplicate calls
-            seen_calls = {}
+            # NOTE: seen_calls is now outside the loop to catch duplicates across multiple steps
             for call in tool_calls:
                 fn = call.get("function", {})
                 name = fn.get("name", "")
