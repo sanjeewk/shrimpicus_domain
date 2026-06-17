@@ -463,10 +463,11 @@ class Database:
 
     def list_reminders(self, chat_id: int, limit: int = 20) -> list[Reminder]:
         cur = self._get_cursor()
+        # Query by user_id instead of chat_id
         query = self._param("""
             SELECT id, chat_id, content, due_at, status, poll_required, poll_id
             FROM reminders
-            WHERE chat_id = ?
+            WHERE user_id = ?
             ORDER BY due_at ASC
             LIMIT ?
         """)
@@ -551,11 +552,12 @@ class Database:
         return int(cur.lastrowid)
 
     def list_todos(self, chat_id: int, include_done: bool = False) -> list[sqlite3.Row]:
+        # Query by user_id (which equals chat_id for Discord bot, but allows web todos with chat_id=0)
         if include_done:
-            query = "SELECT * FROM todos WHERE chat_id = ? ORDER BY id DESC LIMIT 50"
+            query = "SELECT * FROM todos WHERE user_id = ? ORDER BY id DESC LIMIT 50"
             args = (chat_id,)
         else:
-            query = "SELECT * FROM todos WHERE chat_id = ? AND done = 0 ORDER BY id DESC LIMIT 50"
+            query = "SELECT * FROM todos WHERE user_id = ? AND done = 0 ORDER BY id DESC LIMIT 50"
             args = (chat_id,)
         return self.conn.execute(query, args).fetchall()
 
@@ -589,8 +591,9 @@ class Database:
         return int(cur.lastrowid)
 
     def list_birthdays(self, chat_id: int) -> list[sqlite3.Row]:
+        # Query by user_id instead of chat_id
         return self.conn.execute(
-            "SELECT * FROM birthdays WHERE chat_id = ? ORDER BY date_ymd ASC",
+            "SELECT * FROM birthdays WHERE user_id = ? ORDER BY date_ymd ASC",
             (chat_id,),
         ).fetchall()
 
@@ -623,8 +626,9 @@ class Database:
         return int(cur.lastrowid)
 
     def list_habits(self, chat_id: int) -> list[sqlite3.Row]:
+        # Query by user_id instead of chat_id
         return self.conn.execute(
-            "SELECT * FROM habits WHERE chat_id = ? ORDER BY id ASC",
+            "SELECT * FROM habits WHERE user_id = ? ORDER BY id ASC",
             (chat_id,),
         ).fetchall()
 
