@@ -441,10 +441,10 @@ class Database:
     def add_reminder(self, chat_id: int, content: str, due_at_iso: str, poll_required: bool = True) -> int:
         cur = self._get_cursor()
         query = self._param("""
-            INSERT INTO reminders(chat_id, content, due_at, status, poll_required, created_at)
-            VALUES (?, ?, ?, 'pending', ?, ?)
+            INSERT INTO reminders(chat_id, content, due_at, status, poll_required, created_at, user_id)
+            VALUES (?, ?, ?, 'pending', ?, ?, ?)
         """)
-        cur.execute(query, (chat_id, content, due_at_iso, 1 if poll_required else 0, utc_now_iso()))
+        cur.execute(query, (chat_id, content, due_at_iso, 1 if poll_required else 0, utc_now_iso(), chat_id))
         self.conn.commit()
 
         if self.is_postgres:
@@ -539,10 +539,10 @@ class Database:
     def add_todo(self, chat_id: int, task: str, category: str = "General", notion_page_id: str | None = None) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO todos(chat_id, task, category, done, notion_page_id, created_at)
-            VALUES (?, ?, ?, 0, ?, ?)
+            INSERT INTO todos(chat_id, task, category, done, notion_page_id, created_at, user_id)
+            VALUES (?, ?, ?, 0, ?, ?, ?)
             """,
-            (chat_id, task, category, notion_page_id, utc_now_iso()),
+            (chat_id, task, category, notion_page_id, utc_now_iso(), chat_id),
         )
         self.conn.commit()
         return int(cur.lastrowid)
@@ -577,10 +577,10 @@ class Database:
     def add_birthday(self, chat_id: int, person_name: str, date_ymd: str) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO birthdays(chat_id, person_name, date_ymd, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO birthdays(chat_id, person_name, date_ymd, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (chat_id, person_name, date_ymd, utc_now_iso()),
+            (chat_id, person_name, date_ymd, utc_now_iso(), chat_id),
         )
         self.conn.commit()
         return int(cur.lastrowid)
@@ -613,8 +613,8 @@ class Database:
 
     def add_habit(self, chat_id: int, name: str, weekly_goal: int = 7) -> int:
         cur = self.conn.execute(
-            "INSERT INTO habits(chat_id, name, weekly_goal, created_at) VALUES (?, ?, ?, ?)",
-            (chat_id, name, weekly_goal, utc_now_iso()),
+            "INSERT INTO habits(chat_id, name, weekly_goal, created_at, user_id) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, name, weekly_goal, utc_now_iso(), chat_id),
         )
         self.conn.commit()
         return int(cur.lastrowid)
