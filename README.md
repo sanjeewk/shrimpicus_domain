@@ -139,6 +139,7 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 ### Unreleased
 
+- **Documentation cleanup** — removed the obsolete duplicate todo fix note now that the behavior is covered by current code and docs.
 - **README artwork and refreshed screenshots** — replaced the project image and updated web UI screenshots.
 - **Discord multi-user isolation** — Discord DMs and server-channel messages now resolve by Discord user id, enforce private todo ownership, and support one-time web account linking codes.
 - **Board due dates and modern add form** — todo cards now show due dates, and the board add form uses collapsible category/due-date controls with a custom picker instead of native selects.
