@@ -3,10 +3,62 @@
 
 {% block content %}
 <section class="board-toolbar">
-  <form class="todo-add-form" method="post" action="{{ url_for('todos_add') }}">
-    <input class="todo-input" type="text" name="task" maxlength="500"
-           placeholder="Add a new todo..." autocomplete="off" required>
-    <button class="todo-add-btn" type="submit">+</button>
+  <form class="todo-add-form" method="post" action="{{ url_for('todos_add') }}" data-todo-form>
+    <div class="todo-input-row">
+      <input class="todo-input" type="text" name="task" maxlength="500"
+             placeholder="Add a new todo..." autocomplete="off" required>
+      <button class="todo-options-toggle" type="button" data-options-toggle
+              aria-expanded="false" aria-controls="todoOptions" aria-label="Show todo options">
+        <span class="todo-options-toggle__arrow" aria-hidden="true"></span>
+      </button>
+      <button class="todo-add-btn" type="submit" aria-label="Add todo">+</button>
+    </div>
+
+    <div class="todo-options" id="todoOptions" hidden>
+      <input type="hidden" name="category" value="General" data-category-input>
+      <input type="hidden" name="due_date" value="" data-due-date-input>
+
+      <div class="todo-option todo-option--category">
+        <span class="todo-option__label">Category</span>
+        <div class="segmented-control" role="radiogroup" aria-label="Todo category">
+          {% for category in ['General', 'Job', 'Home', 'Finance'] %}
+          <button class="segment {% if category == 'General' %}is-selected{% endif %}"
+                  type="button" data-category-value="{{ category }}"
+                  role="radio" aria-checked="{{ 'true' if category == 'General' else 'false' }}">
+            {{ category }}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="todo-option todo-option--due">
+        <span class="todo-option__label">Due date</span>
+        <div class="date-picker" data-date-picker>
+          <div class="date-picker__topline">
+            <div class="date-picker__selected" data-due-date-label>No due date</div>
+            <button class="date-picker__pick" type="button" data-calendar-toggle
+                    aria-expanded="false" aria-controls="todoCalendarPanel">Pick</button>
+          </div>
+          <div class="date-picker__quick" aria-label="Quick due date options">
+            <button type="button" class="date-pill" data-date-offset="0">Today</button>
+            <button type="button" class="date-pill" data-date-offset="1">Tomorrow</button>
+            <button type="button" class="date-pill" data-date-offset="7">Next week</button>
+            <button type="button" class="date-pill date-pill--clear" data-date-clear>None</button>
+          </div>
+          <div class="date-picker__panel" id="todoCalendarPanel" hidden>
+            <button class="date-picker__nav" type="button" data-calendar-prev aria-label="Previous month">&lsaquo;</button>
+            <div class="date-picker__body">
+              <div class="date-picker__month" data-calendar-label></div>
+              <div class="date-picker__weekdays" aria-hidden="true">
+                <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+              </div>
+              <div class="date-picker__grid" data-calendar-grid></div>
+            </div>
+            <button class="date-picker__nav" type="button" data-calendar-next aria-label="Next month">&rsaquo;</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </form>
   <div class="board-toolbar__counts">
     <span class="pill pill--todo">To do · {{ columns.to_do|length }}</span>
@@ -38,7 +90,11 @@
         <div class="card__task">{{ t.task }}</div>
         <div class="card__meta">
           <span class="chip chip--time">{{ t.created_human }}</span>
+          {% if t.category %}<span class="chip chip--category">{{ t.category }}</span>{% endif %}
           {% if t.linked_notion %}<span class="chip chip--notion">notion</span>{% endif %}
+          {% if t.due_date %}
+          <span class="chip chip--due chip--due-{{ t.due_date.state }}">{{ t.due_date.label }}</span>
+          {% endif %}
         </div>
       </li>
       {% endfor %}

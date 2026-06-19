@@ -70,13 +70,40 @@ def _humanize(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
+def _due_date_view(value: str | None) -> dict[str, str] | None:
+    if not value:
+        return None
+    try:
+        due = date.fromisoformat(value)
+    except ValueError:
+        return None
+    today = datetime.now(timezone.utc).date()
+    if due < today:
+        state = "overdue"
+    elif due == today:
+        state = "today"
+    else:
+        state = "upcoming"
+    return {
+        "value": due.isoformat(),
+        "label": f"Due {due.strftime('%b')} {due.day}",
+        "state": state,
+    }
+
+
 def _ensure_status_column(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(todos)").fetchall()}
+    changed = False
     if "status" not in cols:
         conn.execute(
             "ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'to_do'"
         )
         conn.execute("UPDATE todos SET status = 'done' WHERE done = 1")
+        changed = True
+    if "due_date" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN due_date TEXT")
+        changed = True
+    if changed:
         conn.commit()
 
 
@@ -413,7 +440,7 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
 
             # Load todos for current user only
             todos = conn.execute(
-                """SELECT id, task, status, done, category, notion_page_id, created_at
+                """SELECT id, task, status, done, category, due_date, notion_page_id, created_at
                    FROM todos WHERE user_id = ? ORDER BY created_at DESC""",
                 (user_id,)
             ).fetchall()
@@ -425,6 +452,8 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
                     "task": t["task"],
                     "done": bool(t["done"]),
                     "status": t["status"],
+                    "category": t["category"] if "category" in t.keys() else "General",
+                    "due_date": _due_date_view(t["due_date"] if "due_date" in t.keys() else None),
                     "linked_notion": bool(t["notion_page_id"]),
                     "created_human": _humanize(_parse_iso(t["created_at"])),
                 }
@@ -443,6 +472,18 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
     def todos_add():
         user_id = session.get("user_id")
         task = (request.form.get("task") or "").strip()
+        category = (request.form.get("category") or "General").strip()
+        if category not in {"General", "Job", "Home", "Finance"}:
+            category = "General"
+
+        due_date = (request.form.get("due_date") or "").strip()
+        if due_date:
+            try:
+                due_date = date.fromisoformat(due_date).isoformat()
+            except ValueError:
+                due_date = None
+        else:
+            due_date = None
 
         if not task:
             return redirect(url_for("board"))
@@ -452,8 +493,8 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
             _ensure_status_column(conn)
             _ensure_user_scoped_data(conn)
             conn.execute(
-                "INSERT INTO todos(user_id, chat_id, task, category, status, done, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (user_id, 0, task[:500], "General", "to_do", 0, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO todos(user_id, chat_id, task, category, due_date, status, done, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, 0, task[:500], category, due_date, "to_do", 0, datetime.now(timezone.utc).isoformat()),
             )
             conn.commit()
         finally:

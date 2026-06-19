@@ -113,6 +113,7 @@ class Database:
               user_id INTEGER,
               task TEXT NOT NULL,
               category TEXT NOT NULL DEFAULT 'General',
+              due_date TEXT,
               status TEXT NOT NULL DEFAULT 'to_do',
               done INTEGER NOT NULL DEFAULT 0,
               notion_page_id TEXT,
@@ -271,6 +272,7 @@ class Database:
               user_id INTEGER,
               task TEXT NOT NULL,
               category TEXT NOT NULL DEFAULT 'General',
+              due_date TEXT,
               status TEXT NOT NULL DEFAULT 'to_do',
               done INTEGER NOT NULL DEFAULT 0,
               notion_page_id TEXT,
@@ -418,6 +420,8 @@ class Database:
             self.conn.execute("UPDATE todos SET status = 'done' WHERE done = 1")
         if "user_id" not in cols:
             self.conn.execute("ALTER TABLE todos ADD COLUMN user_id INTEGER DEFAULT 1")
+        if "due_date" not in cols:
+            self.conn.execute("ALTER TABLE todos ADD COLUMN due_date TEXT")
 
         # Reminders migration
         reminder_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(reminders)").fetchall()}
