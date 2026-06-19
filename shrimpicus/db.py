@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from shrimpicus import auth as auth_utils
 
 # Try to import psycopg2, fall back to None if not available
 try:
@@ -23,6 +26,7 @@ def utc_now_iso() -> str:
 class Reminder:
     id: int
     chat_id: int
+    user_id: int
     content: str
     due_at: str
     status: str
@@ -176,11 +180,14 @@ class Database:
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               username TEXT NOT NULL UNIQUE COLLATE NOCASE,
               password_hash TEXT NOT NULL,
+              discord_user_id TEXT UNIQUE,
               created_at TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_users_username
               ON users(username COLLATE NOCASE);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id
+              ON users(discord_user_id);
 
             CREATE TABLE IF NOT EXISTS groups (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,6 +226,18 @@ class Database:
               ON friendships(user_id);
             CREATE INDEX IF NOT EXISTS idx_friendships_friend
               ON friendships(friend_id);
+
+            CREATE TABLE IF NOT EXISTS discord_link_codes (
+              code TEXT PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              expires_at TEXT NOT NULL,
+              used_at TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user
+              ON discord_link_codes(user_id);
             """
         )
 
@@ -256,6 +275,7 @@ class Database:
               id SERIAL PRIMARY KEY,
               username TEXT NOT NULL UNIQUE,
               password_hash TEXT NOT NULL,
+              discord_user_id TEXT UNIQUE,
               created_at TEXT NOT NULL
             );
         """)
@@ -263,6 +283,10 @@ class Database:
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_users_username
               ON users(LOWER(username));
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id
+              ON users(discord_user_id);
         """)
 
         cur.execute("""
@@ -400,12 +424,50 @@ class Database:
               ON friendships(friend_id);
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS discord_link_codes (
+              code TEXT PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              expires_at TEXT NOT NULL,
+              used_at TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user
+              ON discord_link_codes(user_id);
+        """)
+
         cur.close()
 
     def _migrate(self) -> None:
         """Run migrations for SQLite only. PostgreSQL schema is created with all columns."""
         if self.is_postgres:
             return  # PostgreSQL schema is already complete
+
+        # Users migration
+        user_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "discord_user_id" not in user_cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN discord_user_id TEXT")
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discord_link_codes (
+              code TEXT PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              expires_at TEXT NOT NULL,
+              used_at TEXT,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user ON discord_link_codes(user_id)"
+        )
 
         # Todos migration
         cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(todos)").fetchall()}
@@ -445,41 +507,46 @@ class Database:
         if "user_id" not in journal_cols:
             self.conn.execute("ALTER TABLE journal_entries ADD COLUMN user_id INTEGER DEFAULT 1")
 
-    def add_reminder(self, chat_id: int, content: str, due_at_iso: str, poll_required: bool = True) -> int:
+    def add_reminder(
+        self,
+        user_id: int,
+        chat_id: int,
+        content: str,
+        due_at_iso: str,
+        poll_required: bool = True,
+    ) -> int:
         cur = self._get_cursor()
         query = self._param("""
             INSERT INTO reminders(chat_id, content, due_at, status, poll_required, created_at, user_id)
             VALUES (?, ?, ?, 'pending', ?, ?, ?)
         """)
-        cur.execute(query, (chat_id, content, due_at_iso, 1 if poll_required else 0, utc_now_iso(), chat_id))
+        cur.execute(query, (chat_id, content, due_at_iso, 1 if poll_required else 0, utc_now_iso(), user_id))
         self.conn.commit()
 
         if self.is_postgres:
-            # PostgreSQL requires RETURNING to get the ID
             cur.execute("SELECT lastval()")
             row_id = cur.fetchone()[0]
             cur.close()
             return int(row_id)
-        else:
-            row_id = cur.lastrowid
-            cur.close()
-            return int(row_id)
+        row_id = cur.lastrowid
+        cur.close()
+        return int(row_id)
 
-    def list_reminders(self, chat_id: int, limit: int = 20) -> list[Reminder]:
+    def list_reminders(self, user_id: int, limit: int = 20) -> list[Reminder]:
         cur = self._get_cursor()
-        # Query by user_id instead of chat_id
         query = self._param("""
-            SELECT id, chat_id, content, due_at, status, poll_required, poll_id
+            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id
             FROM reminders
             WHERE user_id = ?
             ORDER BY due_at ASC
             LIMIT ?
         """)
-        rows = cur.execute(query, (chat_id, limit)).fetchall()
+        rows = cur.execute(query, (user_id, limit)).fetchall()
         return [
             Reminder(
                 id=row["id"],
                 chat_id=row["chat_id"],
+                user_id=row["user_id"],
                 content=row["content"],
                 due_at=row["due_at"],
                 status=row["status"],
@@ -492,7 +559,7 @@ class Database:
     def due_reminders(self, now_iso: str) -> list[Reminder]:
         rows = self.conn.execute(
             """
-            SELECT id, chat_id, content, due_at, status, poll_required, poll_id
+            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id
             FROM reminders
             WHERE due_at <= ?
               AND status = 'pending'
@@ -504,6 +571,7 @@ class Database:
             Reminder(
                 id=row["id"],
                 chat_id=row["chat_id"],
+                user_id=row["user_id"],
                 content=row["content"],
                 due_at=row["due_at"],
                 status=row["status"],
@@ -544,61 +612,81 @@ class Database:
         )
         self.conn.commit()
 
-    def add_todo(self, chat_id: int, task: str, category: str = "General", notion_page_id: str | None = None) -> int:
+    def add_todo(
+        self,
+        user_id: int,
+        task: str,
+        category: str = "General",
+        notion_page_id: str | None = None,
+        chat_id: int | None = None,
+        due_date: str | None = None,
+    ) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO todos(chat_id, task, category, done, notion_page_id, created_at, user_id)
-            VALUES (?, ?, ?, 0, ?, ?, ?)
+            INSERT INTO todos(chat_id, user_id, task, category, due_date, done, notion_page_id, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
             """,
-            (chat_id, task, category, notion_page_id, utc_now_iso(), chat_id),
+            (chat_id if chat_id is not None else user_id, user_id, task, category, due_date, notion_page_id, utc_now_iso()),
         )
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def list_todos(self, chat_id: int, include_done: bool = False) -> list[sqlite3.Row]:
-        # Query by user_id (which equals chat_id for Discord bot, but allows web todos with chat_id=0)
+    def list_todos(self, user_id: int, include_done: bool = False) -> list[sqlite3.Row]:
         if include_done:
             query = "SELECT * FROM todos WHERE user_id = ? ORDER BY id DESC LIMIT 50"
-            args = (chat_id,)
+            args = (user_id,)
         else:
             query = "SELECT * FROM todos WHERE user_id = ? AND done = 0 ORDER BY id DESC LIMIT 50"
-            args = (chat_id,)
+            args = (user_id,)
         return self.conn.execute(query, args).fetchall()
 
-    def set_todo_done(self, todo_id: int, done: bool = True) -> None:
+    def set_todo_done(self, todo_id: int, done: bool = True, user_id: int | None = None) -> bool:
         new_status = "done" if done else "to_do"
-        self.conn.execute(
-            "UPDATE todos SET done = ?, status = ? WHERE id = ?",
-            (1 if done else 0, new_status, todo_id),
-        )
+        if user_id is None:
+            cur = self.conn.execute(
+                "UPDATE todos SET done = ?, status = ? WHERE id = ?",
+                (1 if done else 0, new_status, todo_id),
+            )
+        else:
+            cur = self.conn.execute(
+                "UPDATE todos SET done = ?, status = ? WHERE id = ? AND user_id = ?",
+                (1 if done else 0, new_status, todo_id, user_id),
+            )
         self.conn.commit()
+        return cur.rowcount > 0
 
-    def set_todo_status(self, todo_id: int, status: str) -> None:
+    def set_todo_status(self, todo_id: int, status: str, user_id: int | None = None) -> bool:
         if status not in ("to_do", "doing", "done"):
             raise ValueError(f"invalid todo status: {status!r}")
         done_flag = 1 if status == "done" else 0
-        self.conn.execute(
-            "UPDATE todos SET status = ?, done = ? WHERE id = ?",
-            (status, done_flag, todo_id),
-        )
+        if user_id is None:
+            cur = self.conn.execute(
+                "UPDATE todos SET status = ?, done = ? WHERE id = ?",
+                (status, done_flag, todo_id),
+            )
+        else:
+            cur = self.conn.execute(
+                "UPDATE todos SET status = ?, done = ? WHERE id = ? AND user_id = ?",
+                (status, done_flag, todo_id, user_id),
+            )
         self.conn.commit()
+        return cur.rowcount > 0
 
-    def add_birthday(self, chat_id: int, person_name: str, date_ymd: str) -> int:
+    def add_birthday(self, user_id: int, person_name: str, date_ymd: str, chat_id: int | None = None) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO birthdays(chat_id, person_name, date_ymd, created_at, user_id)
+            INSERT INTO birthdays(chat_id, user_id, person_name, date_ymd, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (chat_id, person_name, date_ymd, utc_now_iso(), chat_id),
+            (chat_id if chat_id is not None else user_id, user_id, person_name, date_ymd, utc_now_iso()),
         )
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def list_birthdays(self, chat_id: int) -> list[sqlite3.Row]:
-        # Query by user_id instead of chat_id
+    def list_birthdays(self, user_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM birthdays WHERE user_id = ? ORDER BY date_ymd ASC",
-            (chat_id,),
+            (user_id,),
         ).fetchall()
 
     def birthdays_for_month_day(self, month_day: str) -> list[sqlite3.Row]:
@@ -610,36 +698,43 @@ class Database:
             (month_day,),
         ).fetchall()
 
-    def add_journal_entry(self, chat_id: int, content: str, file_path: str | None) -> int:
+    def add_journal_entry(self, user_id: int, content: str, file_path: str | None, chat_id: int | None = None) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO journal_entries(chat_id, content, file_path, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO journal_entries(chat_id, user_id, content, file_path, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (chat_id, content, file_path, utc_now_iso()),
+            (chat_id if chat_id is not None else user_id, user_id, content, file_path, utc_now_iso()),
         )
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def add_habit(self, chat_id: int, name: str, weekly_goal: int = 7) -> int:
+    def add_habit(self, user_id: int, name: str, weekly_goal: int = 7, chat_id: int | None = None) -> int:
         cur = self.conn.execute(
-            "INSERT INTO habits(chat_id, name, weekly_goal, created_at, user_id) VALUES (?, ?, ?, ?, ?)",
-            (chat_id, name, weekly_goal, utc_now_iso(), chat_id),
+            "INSERT INTO habits(chat_id, user_id, name, weekly_goal, created_at) VALUES (?, ?, ?, ?, ?)",
+            (chat_id if chat_id is not None else user_id, user_id, name, weekly_goal, utc_now_iso()),
         )
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def list_habits(self, chat_id: int) -> list[sqlite3.Row]:
-        # Query by user_id instead of chat_id
+    def list_habits(self, user_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM habits WHERE user_id = ? ORDER BY id ASC",
-            (chat_id,),
+            (user_id,),
         ).fetchall()
 
-    def delete_habit(self, habit_id: int) -> None:
+    def delete_habit(self, habit_id: int, user_id: int | None = None) -> bool:
+        if user_id is not None:
+            owner = self.conn.execute(
+                "SELECT id FROM habits WHERE id = ? AND user_id = ?",
+                (habit_id, user_id),
+            ).fetchone()
+            if owner is None:
+                return False
         self.conn.execute("DELETE FROM habit_completions WHERE habit_id = ?", (habit_id,))
-        self.conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
+        cur = self.conn.execute("DELETE FROM habits WHERE id = ?", (habit_id,))
         self.conn.commit()
+        return cur.rowcount > 0
 
     def toggle_habit_completion(self, habit_id: int, date_ymd: str) -> bool:
         """Toggle a habit's completion for a date. Returns True if now completed."""
@@ -680,23 +775,23 @@ class Database:
         self.conn.commit()
 
     # --- read helpers used for RAG context and stats ------------------------ #
-    def find_habit(self, chat_id: int, name_or_id: str) -> sqlite3.Row | None:
-        """Resolve a habit by numeric id or (case-insensitive) name for a chat."""
+    def find_habit(self, user_id: int, name_or_id: str) -> sqlite3.Row | None:
+        """Resolve a habit by numeric id or (case-insensitive) name for a user."""
         text = str(name_or_id).strip()
         if text.lstrip("#").isdigit():
             return self.conn.execute(
-                "SELECT * FROM habits WHERE chat_id = ? AND id = ? LIMIT 1",
-                (chat_id, int(text.lstrip("#"))),
+                "SELECT * FROM habits WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, int(text.lstrip("#"))),
             ).fetchone()
         return self.conn.execute(
-            "SELECT * FROM habits WHERE chat_id = ? AND lower(name) = lower(?) LIMIT 1",
-            (chat_id, text),
+            "SELECT * FROM habits WHERE user_id = ? AND lower(name) = lower(?) LIMIT 1",
+            (user_id, text),
         ).fetchone()
 
-    def completed_todo_count(self, chat_id: int) -> int:
+    def completed_todo_count(self, user_id: int) -> int:
         row = self.conn.execute(
-            "SELECT COUNT(*) AS n FROM todos WHERE chat_id = ? AND done = 1",
-            (chat_id,),
+            "SELECT COUNT(*) AS n FROM todos WHERE user_id = ? AND done = 1",
+            (user_id,),
         ).fetchone()
         return int(row["n"]) if row else 0
 
@@ -721,6 +816,122 @@ class Database:
             "SELECT * FROM users WHERE id = ? LIMIT 1",
             (user_id,),
         ).fetchone()
+
+    def get_user_by_discord_id(self, discord_user_id: int | str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM users WHERE discord_user_id = ? LIMIT 1",
+            (str(discord_user_id),),
+        ).fetchone()
+
+    def get_or_create_user_for_discord(self, discord_user_id: int | str, display_name: str | None = None) -> sqlite3.Row:
+        discord_id = str(discord_user_id)
+        existing = self.get_user_by_discord_id(discord_id)
+        if existing is not None:
+            return existing
+
+        base = f"discord_{discord_id}"
+        username = base[:20]
+        suffix = 1
+        while self.get_user_by_username(username) is not None:
+            suffix_text = f"_{suffix}"
+            username = f"{base[:20 - len(suffix_text)]}{suffix_text}"
+            suffix += 1
+
+        password_hash = auth_utils.hash_password(secrets.token_urlsafe(32))
+        self.conn.execute(
+            "INSERT INTO users(username, password_hash, discord_user_id, created_at) VALUES (?, ?, ?, ?)",
+            (username.lower(), password_hash, discord_id, utc_now_iso()),
+        )
+        self.conn.commit()
+        created = self.get_user_by_discord_id(discord_id)
+        if created is None:
+            raise RuntimeError("Failed to create Discord user")
+        return created
+
+    def create_discord_link_code(self, user_id: int, ttl_minutes: int = 15) -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(minutes=ttl_minutes)
+        self.conn.execute(
+            "UPDATE discord_link_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
+            (now.isoformat(), user_id),
+        )
+        for _ in range(12):
+            code = "".join(secrets.choice(alphabet) for _ in range(8))
+            try:
+                self.conn.execute(
+                    """
+                    INSERT INTO discord_link_codes(code, user_id, expires_at, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (code, user_id, expires_at.isoformat(), now.isoformat()),
+                )
+                self.conn.commit()
+                return code
+            except sqlite3.IntegrityError:
+                continue
+        raise RuntimeError("Could not create unique Discord link code")
+
+    def consume_discord_link_code(self, code: str, discord_user_id: int | str) -> tuple[bool, str]:
+        normalized = "".join(ch for ch in code.upper().strip() if ch.isalnum())
+        row = self.conn.execute(
+            """
+            SELECT * FROM discord_link_codes
+            WHERE code = ? AND used_at IS NULL
+            LIMIT 1
+            """,
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            return False, "That link code is invalid or has already been used."
+
+        now = datetime.now(timezone.utc)
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < now:
+            self.conn.execute(
+                "UPDATE discord_link_codes SET used_at = ? WHERE code = ?",
+                (now.isoformat(), normalized),
+            )
+            self.conn.commit()
+            return False, "That link code has expired. Generate a new one in the web app."
+
+        target_user_id = int(row["user_id"])
+        target_user = self.get_user_by_id(target_user_id)
+        if target_user is None:
+            return False, "The linked web account no longer exists."
+
+        discord_id = str(discord_user_id)
+        linked_value = target_user["discord_user_id"] if "discord_user_id" in target_user.keys() else None
+        if linked_value and linked_value != discord_id:
+            return False, "That web account is already linked to another Discord account."
+
+        existing = self.get_user_by_discord_id(discord_id)
+        if existing is not None and int(existing["id"]) != target_user_id:
+            source_user_id = int(existing["id"])
+            for table in ("todos", "reminders", "birthdays", "journal_entries", "habits"):
+                self.conn.execute(
+                    f"UPDATE {table} SET user_id = ? WHERE user_id = ?",
+                    (target_user_id, source_user_id),
+                )
+            self.conn.execute(
+                "UPDATE users SET discord_user_id = NULL WHERE id = ?",
+                (source_user_id,),
+            )
+
+        self.conn.execute(
+            "UPDATE users SET discord_user_id = ? WHERE id = ?",
+            (discord_id, target_user_id),
+        )
+        self.conn.execute(
+            "UPDATE discord_link_codes SET used_at = ? WHERE code = ?",
+            (now.isoformat(), normalized),
+        )
+        self.conn.commit()
+        linked_user = self.get_user_by_id(target_user_id)
+        username = linked_user["username"] if linked_user else "your web account"
+        return True, f"Discord is now linked to {username}."
 
     # --- friendship management ---------------------------------------------- #
     def add_friend(self, user_id: int, friend_id: int) -> None:

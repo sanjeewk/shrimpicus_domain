@@ -27,6 +27,14 @@ def build_bot(
     intents.guilds = True
 
     bot = commands.Bot(command_prefix=command_prefix, intents=intents)
+    assistant.bot = bot
+
+    def _user_id_for(author: discord.abc.User) -> int:
+        user = assistant.db.get_or_create_user_for_discord(
+            author.id,
+            display_name=getattr(author, "display_name", None) or author.name,
+        )
+        return int(user["id"])
 
     @bot.event
     async def on_ready() -> None:
@@ -74,12 +82,20 @@ def build_bot(
             await ctx.send("Minutes must be a positive integer.")
             return
 
-        reminder_id = assistant.add_reminder_minutes(ctx.channel.id, minutes, text, poll_required=True)
+        user_id = _user_id_for(ctx.author)
+        reminder_id = assistant.add_reminder_minutes(
+            user_id,
+            minutes,
+            text,
+            poll_required=True,
+            delivery_chat_id=ctx.channel.id,
+        )
         await ctx.send(f"Reminder #{reminder_id} scheduled in {minutes} minute(s).")
 
     @bot.command(name="list")
     async def cmd_list(ctx: commands.Context) -> None:
-        await ctx.send(assistant.list_reminders_text(ctx.channel.id))
+        user_id = _user_id_for(ctx.author)
+        await ctx.send(assistant.list_reminders_text(user_id))
 
     @bot.command(name="todo")
     async def cmd_todo(ctx: commands.Context, action: str | None = None, *, value: str | None = None) -> None:
@@ -92,12 +108,14 @@ def build_bot(
             if not value:
                 await ctx.send("Usage: !todo add <task>")
                 return
-            result = await assistant.add_todo(ctx.channel.id, value)
+            user_id = _user_id_for(ctx.author)
+            result = await assistant.add_todo(user_id, value, delivery_chat_id=ctx.channel.id)
             await ctx.send(result)
             return
 
         if action == "list":
-            await ctx.send(assistant.list_todos_text(ctx.channel.id))
+            user_id = _user_id_for(ctx.author)
+            await ctx.send(assistant.list_todos_text(user_id))
             return
 
         if action == "done":
@@ -109,7 +127,8 @@ def build_bot(
             except ValueError:
                 await ctx.send("Todo id must be an integer.")
                 return
-            await ctx.send(assistant.mark_todo_done(todo_id))
+            user_id = _user_id_for(ctx.author)
+            await ctx.send(assistant.mark_todo_done(todo_id, user_id, delivery_chat_id=ctx.channel.id))
             return
 
         await ctx.send("Usage: !todo add <task> | !todo list | !todo done <id>")
@@ -121,14 +140,16 @@ def build_bot(
             return
         action = action.lower()
         if action == "list":
-            await ctx.send(assistant.list_birthdays_text(ctx.channel.id))
+            user_id = _user_id_for(ctx.author)
+            await ctx.send(assistant.list_birthdays_text(user_id))
             return
         if action == "add":
             if not name or not date:
                 await ctx.send("Usage: !birthday add <name> <YYYY-MM-DD>")
                 return
             try:
-                result = assistant.add_birthday(ctx.channel.id, name, date)
+                user_id = _user_id_for(ctx.author)
+                result = assistant.add_birthday(user_id, name, date, delivery_chat_id=ctx.channel.id)
             except Exception as exc:  # noqa: BLE001
                 await ctx.send(f"Could not parse birthday date: {exc}")
                 return
@@ -141,15 +162,25 @@ def build_bot(
         if not text:
             await ctx.send("Usage: !journal <text>")
             return
-        await ctx.send(assistant.journal(ctx.channel.id, text))
+        user_id = _user_id_for(ctx.author)
+        await ctx.send(assistant.journal(user_id, text, delivery_chat_id=ctx.channel.id))
 
     @bot.command(name="ask")
     async def cmd_ask(ctx: commands.Context, *, question: str | None = None) -> None:
         if not question:
             await ctx.send("Usage: !ask <question>")
             return
-        reply = await assistant.free_text(ctx.channel.id, question)
+        user_id = _user_id_for(ctx.author)
+        reply = await assistant.free_text(user_id, question, delivery_chat_id=ctx.channel.id)
         await ctx.send(reply)
+
+    @bot.command(name="link")
+    async def cmd_link(ctx: commands.Context, code: str | None = None) -> None:
+        if not code:
+            await ctx.send("Usage: !link <code>")
+            return
+        ok, message = assistant.db.consume_discord_link_code(code, ctx.author.id)
+        await ctx.send(message)
 
     async def _maybe_transcribe(message: discord.Message) -> str | None:
         if transcriber is None or not transcriber.enabled:
@@ -185,7 +216,9 @@ def build_bot(
         mentioned = bool(bot.user and bot.user in message.mentions)
         is_dm = message.guild is None
 
-        if not (is_dm or mentioned or in_assistant_channel):
+        in_server_channel = message.guild is not None
+
+        if not (is_dm or in_server_channel or mentioned or in_assistant_channel):
             return
 
         transcript = await _maybe_transcribe(message)
@@ -195,7 +228,8 @@ def build_bot(
 
         if transcript:
             await message.channel.send(f"(transcribed) {transcript}")
-        reply = await assistant.free_text(message.channel.id, text)
+        user_id = _user_id_for(message.author)
+        reply = await assistant.free_text(user_id, text, delivery_chat_id=message.channel.id)
         await message.channel.send(reply)
 
     return bot

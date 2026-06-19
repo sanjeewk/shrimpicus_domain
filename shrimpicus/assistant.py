@@ -65,18 +65,25 @@ class AssistantService:
         self.ollama = ollama
         self.bot = bot
 
-        # Use default_user_id as chat_id for all Discord operations
-        # This maps Discord activity to a specific user account (psyduck = 2)
-        self.default_chat_id = settings.default_user_id
-
-    def add_reminder_minutes(self, chat_id: int, minutes: int, content: str, poll_required: bool = True) -> int:
+    def add_reminder_minutes(
+        self,
+        user_id: int,
+        minutes: int,
+        content: str,
+        poll_required: bool = True,
+        delivery_chat_id: int | None = None,
+    ) -> int:
         due_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-        # Use default_chat_id (user_id) instead of Discord chat_id
-        return self.db.add_reminder(self.default_chat_id, content.strip(), due_at.isoformat(), poll_required=poll_required)
+        return self.db.add_reminder(
+            user_id,
+            delivery_chat_id if delivery_chat_id is not None else user_id,
+            content.strip(),
+            due_at.isoformat(),
+            poll_required=poll_required,
+        )
 
-    def list_reminders_text(self, chat_id: int) -> str:
-        # Use default_chat_id (user_id) instead of Discord chat_id
-        reminders = self.db.list_reminders(self.default_chat_id)
+    def list_reminders_text(self, user_id: int) -> str:
+        reminders = self.db.list_reminders(user_id)
         if not reminders:
             return "No reminders yet."
         lines = []
@@ -84,7 +91,13 @@ class AssistantService:
             lines.append(f"#{r.id} [{r.status}] {r.due_at} - {r.content}")
         return "\n".join(lines)
 
-    async def add_todo(self, chat_id: int, task: str, category: str | None = None) -> str:
+    async def add_todo(
+        self,
+        user_id: int,
+        task: str,
+        category: str | None = None,
+        delivery_chat_id: int | None = None,
+    ) -> str:
         task = task.strip()
         category = category if category in TODO_CATEGORIES else classify_todo(task)
         notion_page_id = None
@@ -99,13 +112,19 @@ class AssistantService:
         else:
             err = ""
 
-        todo_id = self.db.add_todo(self.default_chat_id, task, category=category, notion_page_id=notion_page_id)
+        todo_id = self.db.add_todo(
+            user_id,
+            task,
+            category=category,
+            notion_page_id=notion_page_id,
+            chat_id=delivery_chat_id,
+        )
         if notion_page_id:
             return f"Todo #{todo_id} [{category}] added and synced to Notion. {err}".strip()
         return f"Todo #{todo_id} [{category}] added. {err}".strip()
 
-    def list_todos_text(self, chat_id: int) -> str:
-        rows = self.db.list_todos(self.default_chat_id, include_done=False)
+    def list_todos_text(self, user_id: int) -> str:
+        rows = self.db.list_todos(user_id, include_done=False)
         if not rows:
             return "No open todos."
         grouped: dict[str, list[str]] = {c: [] for c in TODO_CATEGORIES}
@@ -121,38 +140,45 @@ class AssistantService:
                 lines.extend(grouped[cat])
         return "\n".join(lines)
 
-    def mark_todo_done(self, todo_id: int, chat_id: int | None = None) -> str:
-        self.db.set_todo_done(todo_id, True)
+    def mark_todo_done(self, todo_id: int, user_id: int, delivery_chat_id: int | None = None) -> str:
+        if not self.db.set_todo_done(todo_id, True, user_id=user_id):
+            return f"No todo #{todo_id} found for your account."
         # Trigger social notifications if bot is available
-        if self.bot and chat_id:
+        if self.bot and delivery_chat_id:
             import asyncio
             from shrimpicus import social_notifications
             asyncio.create_task(
-                social_notifications.check_and_notify_goals(self.db, self.bot, chat_id)
+                social_notifications.check_and_notify_goals(self.db, self.bot, delivery_chat_id, user_id=user_id)
             )
         return f"Marked todo #{todo_id} as done."
 
-    def add_birthday(self, chat_id: int, person_name: str, date_text: str) -> str:
+    def add_birthday(
+        self,
+        user_id: int,
+        person_name: str,
+        date_text: str,
+        delivery_chat_id: int | None = None,
+    ) -> str:
         dt = dt_parser.parse(date_text).date()
-        birthday_id = self.db.add_birthday(self.default_chat_id, person_name.strip(), dt.isoformat())
+        birthday_id = self.db.add_birthday(user_id, person_name.strip(), dt.isoformat(), chat_id=delivery_chat_id)
         return f"Birthday #{birthday_id} saved for {person_name.strip()} on {dt.isoformat()}."
 
-    def list_birthdays_text(self, chat_id: int) -> str:
-        rows = self.db.list_birthdays(self.default_chat_id)
+    def list_birthdays_text(self, user_id: int) -> str:
+        rows = self.db.list_birthdays(user_id)
         if not rows:
             return "No birthdays saved."
         return "\n".join([f"#{r['id']} {r['person_name']} - {r['date_ymd']}" for r in rows])
 
-    def journal(self, chat_id: int, content: str) -> str:
+    def journal(self, user_id: int, content: str, delivery_chat_id: int | None = None) -> str:
         file_path = self.journal.append(content)
-        self.db.add_journal_entry(self.default_chat_id, content, file_path)
+        self.db.add_journal_entry(user_id, content, file_path, chat_id=delivery_chat_id)
         if file_path:
             return f"Journal saved to {file_path}."
         return "Journal saved in database. Set OBSIDIAN_VAULT_PATH to write files."
 
     # --- habits ------------------------------------------------------------- #
-    def list_habits_text(self, chat_id: int) -> str:
-        rows = self.db.list_habits(self.default_chat_id)
+    def list_habits_text(self, user_id: int) -> str:
+        rows = self.db.list_habits(user_id)
         if not rows:
             return "No habits tracked yet."
         today = datetime.now(timezone.utc).date().isoformat()
@@ -163,16 +189,16 @@ class AssistantService:
             lines.append(f"#{h['id']} [{mark}] {h['name']}")
         return "\n".join(lines)
 
-    def log_habit_today(self, chat_id: int, name_or_id: str) -> str:
+    def log_habit_today(self, user_id: int, name_or_id: str) -> str:
         name_or_id = str(name_or_id).strip()
         if not name_or_id:
             return "Which habit? Give a name or id."
-        habit = self.db.find_habit(self.default_chat_id, name_or_id)
+        habit = self.db.find_habit(user_id, name_or_id)
         if habit is None:
             # auto-create by name so "I went to the gym" just works
             if name_or_id.lstrip("#").isdigit():
                 return f"No habit #{name_or_id.lstrip('#')} found."
-            habit_id = self.db.add_habit(self.default_chat_id, name_or_id)
+            habit_id = self.db.add_habit(user_id, name_or_id)
             name = name_or_id
         else:
             habit_id = habit["id"]
@@ -184,30 +210,30 @@ class AssistantService:
         return f"Unlogged '{name}' for today."
 
     # --- RAG context -------------------------------------------------------- #
-    def build_context(self, chat_id: int) -> str:
+    def build_context(self, user_id: int) -> str:
         """Snapshot of the user's current state, injected into the LLM prompt."""
         parts: list[str] = []
-        todos = self.list_todos_text(chat_id)
+        todos = self.list_todos_text(user_id)
         if todos and todos != "No open todos.":
             parts.append("OPEN TODOS:\n" + todos)
-        reminders = self.list_reminders_text(chat_id)
+        reminders = self.list_reminders_text(user_id)
         if reminders and reminders != "No reminders yet.":
             parts.append("REMINDERS:\n" + reminders)
-        habits = self.list_habits_text(chat_id)
+        habits = self.list_habits_text(user_id)
         if habits and habits != "No habits tracked yet.":
             parts.append("HABITS (today):\n" + habits)
-        done_count = self.db.completed_todo_count(chat_id)
+        done_count = self.db.completed_todo_count(user_id)
         parts.append(f"Completed todos all-time: {done_count}.")
         if not parts:
             return "The user has no todos, reminders, or habits yet."
         return "\n\n".join(parts)
 
-    async def free_text(self, chat_id: int, text: str) -> str:
-        parsed = await self._try_rule_based(chat_id, text)
+    async def free_text(self, user_id: int, text: str, delivery_chat_id: int | None = None) -> str:
+        parsed = await self._try_rule_based(user_id, text, delivery_chat_id=delivery_chat_id)
         if parsed:
             return parsed
         try:
-            acted = await self._run_agent(chat_id, text)
+            acted = await self._run_agent(user_id, text, delivery_chat_id=delivery_chat_id)
             if acted:
                 return acted
             return await self.ollama.answer(text)
@@ -217,7 +243,13 @@ class AssistantService:
                 "while the model is offline."
             )
 
-    async def _run_agent(self, chat_id: int, text: str, max_steps: int = 4) -> str | None:
+    async def _run_agent(
+        self,
+        user_id: int,
+        text: str,
+        max_steps: int = 4,
+        delivery_chat_id: int | None = None,
+    ) -> str | None:
         """Agentic tool-calling loop with RAG context.
 
         Injects a snapshot of the user's data (RAG), offers the tool registry,
@@ -227,7 +259,7 @@ class AssistantService:
         """
         from shrimpicus import tools as tools_mod  # local import avoids a cycle
 
-        context = self.build_context(chat_id)
+        context = self.build_context(user_id)
         messages: list[dict] = [
             {
                 "role": "system",
@@ -298,7 +330,13 @@ class AssistantService:
                     continue
 
                 seen_calls[call_signature] = True
-                result = await tools_mod.dispatch(self, chat_id, name, args)
+                result = await tools_mod.dispatch(
+                    self,
+                    user_id,
+                    name,
+                    args,
+                    delivery_chat_id=delivery_chat_id,
+                )
 
                 # Build tool response message
                 tool_msg = {"role": "tool", "content": result}
@@ -319,7 +357,12 @@ class AssistantService:
                 return m.get("content")
         return "I wasn't able to finish that."
 
-    async def _try_rule_based(self, chat_id: int, text: str) -> str | None:
+    async def _try_rule_based(
+        self,
+        user_id: int,
+        text: str,
+        delivery_chat_id: int | None = None,
+    ) -> str | None:
         t = text.strip()
         lower = t.lower()
 
@@ -332,35 +375,41 @@ class AssistantService:
                 n *= 60
             elif unit.startswith("day"):
                 n *= 60 * 24
-            rid = self.add_reminder_minutes(chat_id, n, content, poll_required=True)
+            rid = self.add_reminder_minutes(
+                user_id,
+                n,
+                content,
+                poll_required=True,
+                delivery_chat_id=delivery_chat_id,
+            )
             return f"Reminder #{rid} added."
 
         if lower == "tdl" or lower.startswith("tdl "):
-            return self.list_todos_text(chat_id)
+            return self.list_todos_text(user_id)
 
         match = re.match(r"td\s+(.+)$", t, re.I)
         if match:
             task = match.group(1).strip()
             if task:
-                return await self.add_todo(chat_id, task)
+                return await self.add_todo(user_id, task, delivery_chat_id=delivery_chat_id)
 
         if lower.startswith("add todo "):
             task = t[9:].strip()
             if task:
-                return await self.add_todo(chat_id, task)
+                return await self.add_todo(user_id, task, delivery_chat_id=delivery_chat_id)
 
         if lower.startswith("journal "):
             content = t[8:].strip()
             if content:
-                return self.journal(chat_id, content)
+                return self.journal(user_id, content, delivery_chat_id=delivery_chat_id)
 
         match = re.search(r"birthday\s+(.+)\s+on\s+(.+)$", t, re.I)
         if match:
-            return self.add_birthday(chat_id, match.group(1), match.group(2))
+            return self.add_birthday(user_id, match.group(1), match.group(2), delivery_chat_id=delivery_chat_id)
 
         match = re.search(r"done todo\s+#?(\d+)", t, re.I)
         if match:
             todo_id = int(match.group(1))
-            return self.mark_todo_done(todo_id)
+            return self.mark_todo_done(todo_id, user_id, delivery_chat_id=delivery_chat_id)
 
         return None

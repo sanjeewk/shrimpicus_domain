@@ -142,6 +142,7 @@ def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           username TEXT NOT NULL UNIQUE COLLATE NOCASE,
           password_hash TEXT NOT NULL,
+          discord_user_id TEXT UNIQUE,
           created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS groups (
@@ -169,11 +170,37 @@ def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
           FOREIGN KEY (user_id) REFERENCES users(id),
           FOREIGN KEY (friend_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS discord_link_codes (
+          code TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          expires_at TEXT NOT NULL,
+          used_at TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id)
+        );
         CREATE INDEX IF NOT EXISTS idx_username ON users(username);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id);
         CREATE INDEX IF NOT EXISTS idx_group_members ON group_members(group_id, user_id);
         CREATE INDEX IF NOT EXISTS idx_friendships ON friendships(user_id, friend_id);
+        CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user ON discord_link_codes(user_id);
         """
     )
+    user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "discord_user_id" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN discord_user_id TEXT")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS discord_link_codes (
+          code TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          expires_at TEXT NOT NULL,
+          used_at TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user ON discord_link_codes(user_id)")
     conn.commit()
 
 
@@ -428,6 +455,18 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
     def logout():
         session.clear()
         return redirect(url_for("login"))
+
+    @app.route("/discord/link", methods=["POST"])
+    @login_required
+    def discord_link():
+        user_id = int(session["user_id"])
+        db = Database(app.config["DB_PATH"])
+        try:
+            db.init()
+            code = db.create_discord_link_code(user_id)
+        finally:
+            db.conn.close()
+        return redirect(url_for("social", discord_link_code=code))
 
     @app.route("/board")
     @login_required
@@ -854,6 +893,7 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
                 active_page="social",
                 groups=groups_data,
                 friends=[{"id": f["id"], "username": f["username"]} for f in friends],
+                discord_link_code=request.args.get("discord_link_code"),
             )
         finally:
             conn.close()

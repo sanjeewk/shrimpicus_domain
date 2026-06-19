@@ -5,7 +5,7 @@ This reuses the *exact same* tool registry as the Discord agent loop
 assistant can do. The server builds its own :class:`AssistantService` with the
 same wiring as ``main.py``.
 
-Because MCP has no Discord channel, the ``chat_id`` that every tool is scoped to
+Because MCP has no Discord author, the app ``user_id`` that every tool is scoped to
 comes from config: ``MCP_CHAT_ID`` (falls back to ``0``). Run it with::
 
     shrimpicus-mcp

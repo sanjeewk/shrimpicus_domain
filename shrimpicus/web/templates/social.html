@@ -6,6 +6,22 @@
 <div style="padding: 2rem;">
     <h1 style="color: #0ff; margin-bottom: 2rem;">Social</h1>
 
+    <section style="background: rgba(0,0,0,0.3); border: 1px solid #0ff; padding: 1rem; margin-bottom: 2rem; border-radius: 8px;">
+        <h2 style="color: #ff00ff; margin-bottom: 0.75rem;">Discord Link</h2>
+        <p style="color: #ccc; margin: 0 0 1rem;">Link this web account to Discord so DMs and server-channel messages update your private todos only.</p>
+        {% if discord_link_code %}
+        <div style="background: rgba(0,0,0,0.5); border: 1px solid #ffcc00; padding: 0.75rem; margin-bottom: 1rem; color: #fff;">
+            In Discord, send: <code style="color: #ffcc00; font-weight: bold;">!link {{ discord_link_code }}</code>
+            <div style="color: #999; font-size: 0.8rem; margin-top: 0.4rem;">This code expires in 15 minutes and can be used once.</div>
+        </div>
+        {% endif %}
+        <form method="POST" action="{{ url_for('discord_link') }}">
+            <button type="submit" style="padding: 0.5rem 1rem; background: #0ff; color: #000; border: none; cursor: pointer; font-weight: bold;">
+                Generate Discord Link Code
+            </button>
+        </form>
+    </section>
+
     <!-- Groups Section -->
     <section style="margin-bottom: 3rem;">
         <h2 style="color: #ff00ff; margin-bottom: 1rem;">Your Groups</h2>

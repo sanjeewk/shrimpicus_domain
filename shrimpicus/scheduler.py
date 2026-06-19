@@ -18,13 +18,21 @@ class ReminderCheckinView(discord.ui.View):
     @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
     async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _ = button
-        _, msg = self.scheduler.apply_checkin_answer(self.reminder_id, yes=True)
+        _, msg = self.scheduler.apply_checkin_answer(
+            self.reminder_id,
+            yes=True,
+            discord_user_id=interaction.user.id,
+        )
         await interaction.response.send_message(msg, ephemeral=True)
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
     async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _ = button
-        _, msg = self.scheduler.apply_checkin_answer(self.reminder_id, yes=False)
+        _, msg = self.scheduler.apply_checkin_answer(
+            self.reminder_id,
+            yes=False,
+            discord_user_id=interaction.user.id,
+        )
         await interaction.response.send_message(msg, ephemeral=True)
 
 
@@ -86,13 +94,23 @@ class ShrimpScheduler:
             return None
         return channel
 
-    def apply_checkin_answer(self, reminder_id: int, yes: bool) -> tuple[int | None, str]:
+    def apply_checkin_answer(
+        self,
+        reminder_id: int,
+        yes: bool,
+        discord_user_id: int | None = None,
+    ) -> tuple[int | None, str]:
         row = self.db.conn.execute(
             "SELECT * FROM reminders WHERE id = ? LIMIT 1",
             (reminder_id,),
         ).fetchone()
         if not row:
             return None, "No matching reminder found."
+
+        if discord_user_id is not None:
+            user = self.db.get_user_by_discord_id(discord_user_id)
+            if user is None or int(user["id"]) != int(row["user_id"]):
+                return None, "This reminder belongs to another Shrimpicus user."
 
         if yes:
             self.db.mark_reminder_completed(reminder_id)

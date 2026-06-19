@@ -4,7 +4,7 @@ Each :class:`Tool` carries a JSON Schema (consumed by Ollama's ``tools`` array
 *and* by the MCP server's ``list_tools``) plus an async handler that runs the
 action against :class:`AssistantService`.
 
-The ``chat_id`` is **never** a tool parameter — it is injected by the caller
+The ``user_id``/delivery chat is **never** a tool parameter — it is injected by the caller
 (``dispatch``) from a trusted context (the Discord channel id, or the MCP
 server's configured default). The model only ever picks a tool name and its
 domain arguments, so it cannot reach another chat's data by naming an id.
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 if TYPE_CHECKING:  # avoid a circular import; AssistantService imports this module
     from shrimpicus.assistant import AssistantService
 
-Handler = Callable[["AssistantService", int, dict[str, Any]], Awaitable[str]]
+Handler = Callable[["AssistantService", int, dict[str, Any], int | None], Awaitable[str]]
 
 
 @dataclass(frozen=True)
@@ -44,74 +44,76 @@ class Tool:
 # Handlers — thin adapters over AssistantService. Keep arg coercion here so the
 # model can be sloppy (ints as strings, missing optionals) without crashing.
 # --------------------------------------------------------------------------- #
-async def _add_todo(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
+async def _add_todo(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     task = str(args.get("task", "")).strip()
     if not task:
         return "Cannot add an empty todo."
     category = args.get("category") or None
-    return await svc.add_todo(chat_id, task, category)
+    return await svc.add_todo(user_id, task, category, delivery_chat_id=delivery_chat_id)
 
 
-async def _list_todos(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.list_todos_text(chat_id)
+async def _list_todos(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.list_todos_text(user_id)
 
 
-async def _complete_todo(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.mark_todo_done(int(args["todo_id"]))
+async def _complete_todo(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.mark_todo_done(int(args["todo_id"]), user_id, delivery_chat_id=delivery_chat_id)
 
 
-async def _set_todo_status(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
+async def _set_todo_status(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     status = str(args["status"]).strip().lower()
     todo_id = int(args["todo_id"])
     try:
-        svc.db.set_todo_status(todo_id, status)
+        updated = svc.db.set_todo_status(todo_id, status, user_id=user_id)
     except ValueError as exc:
         return str(exc)
+    if not updated:
+        return f"No todo #{todo_id} found for your account."
     return f"Todo #{todo_id} moved to {status}."
 
 
-async def _add_reminder(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
+async def _add_reminder(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     minutes = int(args["minutes"])
     content = str(args.get("content", "")).strip()
     if minutes <= 0 or not content:
         return "Need a positive minute count and reminder text."
-    rid = svc.add_reminder_minutes(chat_id, minutes, content, poll_required=True)
+    rid = svc.add_reminder_minutes(user_id, minutes, content, poll_required=True, delivery_chat_id=delivery_chat_id)
     return f"Reminder #{rid} set in {minutes} minute(s)."
 
 
-async def _list_reminders(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.list_reminders_text(chat_id)
+async def _list_reminders(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.list_reminders_text(user_id)
 
 
-async def _add_habit(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
+async def _add_habit(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     name = str(args.get("name", "")).strip()
     if not name:
         return "Cannot add an unnamed habit."
-    hid = svc.db.add_habit(chat_id, name)
+    hid = svc.db.add_habit(user_id, name, chat_id=delivery_chat_id)
     return f"Habit #{hid} '{name}' added."
 
 
-async def _list_habits(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.list_habits_text(chat_id)
+async def _list_habits(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.list_habits_text(user_id)
 
 
-async def _log_habit(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.log_habit_today(chat_id, args.get("name_or_id", ""))
+async def _log_habit(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.log_habit_today(user_id, args.get("name_or_id", ""))
 
 
-async def _add_birthday(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.add_birthday(chat_id, str(args["name"]), str(args["date"]))
+async def _add_birthday(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.add_birthday(user_id, str(args["name"]), str(args["date"]), delivery_chat_id=delivery_chat_id)
 
 
-async def _list_birthdays(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
-    return svc.list_birthdays_text(chat_id)
+async def _list_birthdays(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.list_birthdays_text(user_id)
 
 
-async def _add_journal(svc: "AssistantService", chat_id: int, args: dict[str, Any]) -> str:
+async def _add_journal(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     content = str(args.get("content", "")).strip()
     if not content:
         return "Nothing to journal."
-    return svc.journal(chat_id, content)
+    return svc.journal(user_id, content, delivery_chat_id=delivery_chat_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -254,16 +256,17 @@ def ollama_tool_schemas() -> list[dict[str, Any]]:
 
 async def dispatch(
     assistant: "AssistantService",
-    chat_id: int,
+    user_id: int,
     name: str,
     args: dict[str, Any] | None,
+    delivery_chat_id: int | None = None,
 ) -> str:
     """Run a tool by name. Errors are returned as text so the model can recover."""
     tool = TOOLS_BY_NAME.get(name)
     if tool is None:
         return f"Unknown tool: {name}"
     try:
-        return await tool.handler(assistant, chat_id, args or {})
+        return await tool.handler(assistant, user_id, args or {}, delivery_chat_id)
     except (KeyError, ValueError, TypeError) as exc:
         return f"Tool {name} got bad arguments: {exc}"
     except Exception as exc:  # noqa: BLE001 — surface, don't crash the loop

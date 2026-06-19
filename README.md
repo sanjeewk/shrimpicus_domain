@@ -137,6 +137,7 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 ### Unreleased
 
+- **Discord multi-user isolation** — Discord DMs and server-channel messages now resolve by Discord user id, enforce private todo ownership, and support one-time web account linking codes.
 - **Board due dates and modern add form** — todo cards now show due dates, and the board add form uses collapsible category/due-date controls with a custom picker instead of native selects.
 - **OpenRouter API support** — use hosted models (GPT-4o-mini, Gemini Flash, Claude Haiku, Llama) instead of local Ollama for 10x faster inference (200-500ms vs 2-5s) and lower server requirements. Affordable pricing from $0.29-3.60/month. Set `LLM_PROVIDER=openrouter` and `OPENROUTER_API_KEY` in `.env` to enable. Works globally including Hong Kong. All RAG and tool calling features work with both providers.
 - **PostgreSQL support for production** — database layer now supports both SQLite (local development) and PostgreSQL (production hosting). Set `DATABASE_URL` in `.env` to use PostgreSQL. Migration script included (`migrate_to_postgres.py`) to transfer existing SQLite data to PostgreSQL.
