@@ -1,6 +1,12 @@
 # Shrimpicus
 
-Shrimpicus is a personal AI assistant built with Python. It runs as a Discord bot, uses a local Ollama model for lightweight reasoning, stores reminders/todos/birthdays in SQLite, optionally syncs todos to Notion, and appends journal notes to an Obsidian vault.
+Shrimpicus is a task management tool with social features made to make gettingsthings done just a little bit easier. 
+
+Self improvemnt is marketed as a independent venture, one where you block off the rest of the world and focus on yourself to get better. Why this sounds good in practice, human beings are not made for solitary progress. So this project is my way of bringing a social aspect into self improvement - by having your friends have access to your to dos and habit tracking, you can get recognition and encouragment to complete your tasks and continue working on your tasks.
+
+Key features include a Discord bot with RAG support and a MCP to allow easy addition and changes to tasks, and a web inteface with social features. 
+
+The project is named shrimpicus after my pet cleaner shrimp (RIP) 
 
 ![Shrimpicus](shrimp.jpeg)
 
@@ -85,7 +91,7 @@ pip install -e '.[mcp]'
 shrimpicus-mcp
 ```
 
-**Configure Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Configure Claude Desktop** — add this to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
@@ -104,9 +110,9 @@ Shrimpicus now supports multi-user accounts with groups and friend connections.
 
 ### Getting Started
 
-1. **Sign up** — Visit `http://127.0.0.1:5005` and create an account (3-20 character username, 6+ char password)
+1. **Sign up** — Visit `http://127.0.0.1:5005` and create an account (3-20 character username, 6+ character password)
 2. **Add friends** — Go to `/social` and add friends by username
-3. **Create groups** — Create a group (up to 10 members), add friends to it
+3. **Create groups** — Create a group (up to 10 members) and add friends to it
 4. **Track progress** — See real-time stats for each group member (todos done today, habits logged today)
 
 ### Group Notifications (Discord)
@@ -141,24 +147,24 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 - **Documentation cleanup** — removed the obsolete duplicate todo fix note now that the behavior is covered by current code and docs.
 - **README artwork and refreshed screenshots** — replaced the project image and updated web UI screenshots.
-- **Discord multi-user isolation** — Discord DMs and server-channel messages now resolve by Discord user id, enforce private todo ownership, and support one-time web account linking codes.
+- **Discord multi-user isolation** — Discord DMs and server-channel messages now resolve by Discord user ID, enforce private todo ownership, and support one-time web account linking codes.
 - **Board due dates and modern add form** — todo cards now show due dates, and the board add form uses collapsible category/due-date controls with a custom picker instead of native selects.
-- **OpenRouter API support** — use hosted models (GPT-4o-mini, Gemini Flash, Claude Haiku, Llama) instead of local Ollama for 10x faster inference (200-500ms vs 2-5s) and lower server requirements. Affordable pricing from $0.29-3.60/month. Set `LLM_PROVIDER=openrouter` and `OPENROUTER_API_KEY` in `.env` to enable. Works globally including Hong Kong. All RAG and tool calling features work with both providers.
+- **OpenRouter API support** — Use hosted models (GPT-4o-mini, Gemini Flash, Claude Haiku, Llama) instead of local Ollama for 10x faster inference (200-500ms vs 2-5s) and lower server requirements. Pricing starts at $0.29-3.60/month. Set `LLM_PROVIDER=openrouter` and `OPENROUTER_API_KEY` in `.env` to enable it. It works globally, including in Hong Kong. All RAG and tool-calling features work with both providers.
 - **PostgreSQL support for production** — database layer now supports both SQLite (local development) and PostgreSQL (production hosting). Set `DATABASE_URL` in `.env` to use PostgreSQL. Migration script included (`migrate_to_postgres.py`) to transfer existing SQLite data to PostgreSQL.
-- **Production deployment preparation** — added `psycopg2-binary` and `gunicorn` dependencies, created `.env.production.example` template, added `shrimpicus-bot` entrypoint alias. See `DEPLOYMENT_PLAN.md` for full hosting guide.
+- **Production deployment preparation** — Added `psycopg2-binary` and `gunicorn` dependencies, created the `.env.production.example` template, and added the `shrimpicus-bot` entrypoint alias. See `DEPLOYMENT_PLAN.md` for the full hosting guide.
 - **Social features with multi-user authentication** — user accounts with username/password (argon2 hashing), login/signup pages, session management. Create groups (max 10 members), add friends, and view real-time stats (todos done, habits logged) for each group member.
 - **Group notifications** — Discord bot notifies groups when members complete all their daily todos or complete 2+ todos in one day. Notifications appear in the shared Discord channel with group context.
 - **Multi-user data model** — all entities (todos, reminders, habits, birthdays, journal) now scoped to `user_id`. Existing data migrates to default user (ID 1) automatically.
 - **Social page** — new `/social` web interface to manage groups, add friends by username, and see group members' daily progress at a glance.
 - **RAG + tool calling** — the assistant now injects a context snapshot (todos, reminders, habits, completion count) into every free-text conversation and can directly add, complete, or modify your data via an agentic tool-calling loop. Natural commands like "add buy milk and mark todo 3 done" just work.
-- **MCP server** — `shrimpicus-mcp` exposes the same tool registry over stdio so Claude Desktop (or any MCP client) can manage your todos/reminders/habits. Install with `pip install -e '.[mcp]'`.
+- **MCP server** — `shrimpicus-mcp` exposes the same tool registry over stdio so Claude Desktop (or any MCP client) can manage your todos, reminders, and habits. Install it with `pip install -e '.[mcp]'`.
 - **Habit tracking** — log daily habits via Discord (`log_habit` tool, or "I went to the gym"), list habits with completion status, and auto-create habits on first mention. New `list_habits_text` and `log_habit_today` methods in `AssistantService`.
-- **Database bug fix** — `set_meta` was unreachable dead code after `get_meta`'s return; split into a working method so the birthday scheduler no longer crashes on its daily check.
-- **Habit tracker page** — new `/habits` page in the web viewer. Add habits, toggle today's completion with a tap, view current/longest streak stats per habit, 7-day history strip, and bottom totals panel (tracked count, done-today count, best streak). Habits scoped per chat like todos. Backend: `habits` + `habit_completions` tables in `db.py` and web app, streak calculation, `/api/habits/<id>/toggle` endpoint.
-- **Feature roadmap** — added FEATURES.md documenting planned features including recurring reminders, habit tracking, social features, and expanded integrations.
-- **Multi-page web interface** — the web viewer is now three pages: a drag-and-drop kanban **Board** (to_do/doing/done) backed by a new `status` column and `/api/todos/<id>/status` endpoint, an **XP** quest-log scoreboard, and a pixel **Field** that grows a daisy per completed todo (debug slider + WebAudio chiptune toggle).
-- **Retro pixel-art web viewer** — `shrimpicus-web` launches a Flask app that reads the existing SQLite DB and renders a single-page Quest Log of todos. Stats panel with XP/HP completion bar, per-chat ("SELECT WORLD") filter, SHOW DEFEATED toggle. Theme synthesizes arcade-cabinet neon (cyan/lime/hot pink/gold), JRPG quest-log framing, and Game-Boy/CRT chrome (scanlines, vignette, boot-flicker, chunky pixel borders). Header has three pixel-SVG spinners (coin, floppy, star).
-- **Todo categories with auto-classification** — todos are now grouped into Job / Home / Finance / General by keyword scoring of the task text. New `category` column on the todos table (idempotent ALTER TABLE migration). Two free-text shortcuts: `td <task>` to add and `tdl` to list (grouped by category).
-- **Assistant channels and DM routing** — the bot now replies to free-text in any of: a DM, a message that mentions it, or a message in a channel listed in `ASSISTANT_CHANNELS` (comma-separated, default `general`). Previously required an @-mention everywhere.
-- **Voice transcription** — audio attachments (`.ogg`/`.mp3`/`.wav`/`.m4a`/`.webm`/`.flac`) on free-text messages are downloaded, transcribed via faster-whisper on a worker thread, echoed back to the channel, and fed to the assistant. Optional install: `pip install -e .[voice]`. Configured via `WHISPER_ENABLED` / `WHISPER_MODEL`.
+- **Database bug fix** — `set_meta` was unreachable dead code after `get_meta`'s return statement; it was split into a working method so the birthday scheduler no longer crashes during its daily check.
+- **Habit tracker page** — New `/habits` page in the web viewer. Add habits, toggle today's completion with a tap, view current and longest streak stats per habit, see a 7-day history strip, and use the bottom totals panel (tracked count, done-today count, best streak). Habits are scoped per chat like todos. Backend includes the `habits` and `habit_completions` tables in `db.py` and the web app, streak calculation, and the `/api/habits/<id>/toggle` endpoint.
+- **Feature roadmap** — Added `FEATURES.md`, documenting planned features including recurring reminders, habit tracking, social features, and expanded integrations.
+- **Multi-page web interface** — The web viewer now has three pages: a drag-and-drop kanban **Board** (`to_do`/`doing`/`done`) backed by a new `status` column and `/api/todos/<id>/status` endpoint, an **XP** quest-log scoreboard, and a pixel **Field** that grows a daisy for each completed todo (debug slider + WebAudio chiptune toggle).
+- **Retro pixel-art web viewer** — `shrimpicus-web` launches a Flask app that reads the existing SQLite DB and renders a single-page Quest Log of todos. It includes a stats panel with an XP/HP completion bar, a per-chat ("SELECT WORLD") filter, and a SHOW DEFEATED toggle. The theme blends arcade-cabinet neon (cyan/lime/hot pink/gold), JRPG quest-log framing, and Game Boy/CRT chrome (scanlines, vignette, boot flicker, chunky pixel borders). The header has three pixel-SVG spinners (coin, floppy, star).
+- **Todo categories with auto-classification** — Todos are now grouped into Job / Home / Finance / General by keyword scoring of the task text. A new `category` column was added to the todos table with an idempotent `ALTER TABLE` migration. Two free-text shortcuts are included: `td <task>` to add and `tdl` to list (grouped by category).
+- **Assistant channels and DM routing** — The bot now replies to free-text in any of these contexts: a DM, a message that mentions it, or a message in a channel listed in `ASSISTANT_CHANNELS` (comma-separated, default `general`). Previously, it required an @-mention everywhere.
+- **Voice transcription** — Audio attachments (`.ogg`/`.mp3`/`.wav`/`.m4a`/`.webm`/`.flac`) on free-text messages are downloaded, transcribed via faster-whisper on a worker thread, echoed back to the channel, and fed to the assistant. Optional install: `pip install -e .[voice]`. Configure it with `WHISPER_ENABLED` / `WHISPER_MODEL`.
 # shrimpicus_domain
