@@ -15,6 +15,7 @@ from shrimpicus.db import Database
 
 
 VALID_STATUSES = ("to_do", "doing", "done")
+GROUP_JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 def _connect(db_path: Path, database_url: str = "") -> sqlite3.Connection:
@@ -91,6 +92,63 @@ def _due_date_view(value: str | None) -> dict[str, str] | None:
     }
 
 
+def _todo_view(row: sqlite3.Row, owner_username: str | None = None) -> dict[str, object]:
+    status = row["status"] if "status" in row.keys() else ("done" if row["done"] else "to_do")
+    todo = {
+        "id": row["id"],
+        "task": row["task"],
+        "done": bool(row["done"]),
+        "status": status,
+        "category": row["category"] if "category" in row.keys() else "General",
+        "due_date": _due_date_view(row["due_date"] if "due_date" in row.keys() else None),
+        "linked_notion": bool(row["notion_page_id"]),
+        "created_human": _humanize(_parse_iso(row["created_at"])),
+    }
+    if owner_username is not None:
+        todo["owner_username"] = owner_username
+    return todo
+
+
+def _generate_group_join_code(conn: sqlite3.Connection, length: int = 8) -> str:
+    for _ in range(24):
+        code = "".join(secrets.choice(GROUP_JOIN_CODE_ALPHABET) for _ in range(length))
+        existing = conn.execute(
+            "SELECT 1 FROM groups WHERE join_code = ? LIMIT 1",
+            (code,),
+        ).fetchone()
+        if existing is None:
+            return code
+    raise RuntimeError("Could not generate unique group join code")
+
+
+def _insert_group(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    created_by_user_id: int,
+    join_code: str,
+    created_at: str,
+) -> int:
+    group_cols = {row["name"] for row in conn.execute("PRAGMA table_info(groups)").fetchall()}
+    if "owner_id" in group_cols:
+        cur = conn.execute(
+            """
+            INSERT INTO groups(name, owner_id, created_by_user_id, join_code, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (name, created_by_user_id, created_by_user_id, join_code, created_at),
+        )
+    else:
+        cur = conn.execute(
+            """
+            INSERT INTO groups(name, created_by_user_id, join_code, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (name, created_by_user_id, join_code, created_at),
+        )
+    return int(cur.lastrowid)
+
+
 def _ensure_status_column(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(todos)").fetchall()}
     changed = False
@@ -148,9 +206,10 @@ def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS groups (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
-          owner_id INTEGER NOT NULL,
+          created_by_user_id INTEGER,
+          join_code TEXT UNIQUE,
           created_at TEXT NOT NULL,
-          FOREIGN KEY (owner_id) REFERENCES users(id)
+          FOREIGN KEY (created_by_user_id) REFERENCES users(id)
         );
         CREATE TABLE IF NOT EXISTS group_members (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,7 +238,6 @@ def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
           FOREIGN KEY(user_id) REFERENCES users(id)
         );
         CREATE INDEX IF NOT EXISTS idx_username ON users(username);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id);
         CREATE INDEX IF NOT EXISTS idx_group_members ON group_members(group_id, user_id);
         CREATE INDEX IF NOT EXISTS idx_friendships ON friendships(user_id, friend_id);
         CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user ON discord_link_codes(user_id);
@@ -188,7 +246,29 @@ def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
     user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "discord_user_id" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN discord_user_id TEXT")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)")
+    group_cols = {row["name"] for row in conn.execute("PRAGMA table_info(groups)").fetchall()}
+    if "created_by_user_id" not in group_cols:
+        conn.execute("ALTER TABLE groups ADD COLUMN created_by_user_id INTEGER")
+    if "owner_id" in group_cols:
+        conn.execute(
+            """
+            UPDATE groups
+            SET created_by_user_id = owner_id
+            WHERE created_by_user_id IS NULL
+            """
+        )
+    if "join_code" not in group_cols:
+        conn.execute("ALTER TABLE groups ADD COLUMN join_code TEXT")
+    missing_codes = conn.execute(
+        "SELECT id FROM groups WHERE join_code IS NULL OR TRIM(join_code) = ''"
+    ).fetchall()
+    for row in missing_codes:
+        conn.execute(
+            "UPDATE groups SET join_code = ? WHERE id = ?",
+            (_generate_group_join_code(conn), row["id"]),
+        )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_join_code ON groups(join_code)")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS discord_link_codes (
@@ -456,6 +536,33 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
         session.clear()
         return redirect(url_for("login"))
 
+    @app.route("/account")
+    @login_required
+    def account():
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
+        try:
+            _ensure_auth_tables(conn)
+            user = get_current_user(conn)
+            if user is None:
+                return redirect(url_for("login"))
+
+            completed_tasks = conn.execute(
+                "SELECT COUNT(*) AS n FROM todos WHERE user_id = ? AND done = 1",
+                (user["id"],),
+            ).fetchone()["n"]
+
+            return render_template(
+                "account.html",
+                active_page="account",
+                user=user,
+                completed_tasks=completed_tasks,
+                discord_link_code=request.args.get("discord_link_code"),
+                notice=request.args.get("notice"),
+                error=request.args.get("error"),
+            )
+        finally:
+            conn.close()
+
     @app.route("/discord/link", methods=["POST"])
     @login_required
     def discord_link():
@@ -466,7 +573,7 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
             code = db.create_discord_link_code(user_id)
         finally:
             db.conn.close()
-        return redirect(url_for("social", discord_link_code=code))
+        return redirect(url_for("account", discord_link_code=code))
 
     @app.route("/board")
     @login_required
@@ -486,16 +593,7 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
 
             columns = {"to_do": [], "doing": [], "done": []}
             for t in todos:
-                todo_dict = {
-                    "id": t["id"],
-                    "task": t["task"],
-                    "done": bool(t["done"]),
-                    "status": t["status"],
-                    "category": t["category"] if "category" in t.keys() else "General",
-                    "due_date": _due_date_view(t["due_date"] if "due_date" in t.keys() else None),
-                    "linked_notion": bool(t["notion_page_id"]),
-                    "created_human": _humanize(_parse_iso(t["created_at"])),
-                }
+                todo_dict = _todo_view(t)
                 columns.setdefault(t["status"], columns["to_do"]).append(todo_dict)
 
             return render_template(
@@ -814,16 +912,17 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
     @app.route("/social")
     @login_required
     def social():
-        conn = _connect(app.config["DB_PATH"])
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
         try:
             _ensure_auth_tables(conn)
+            _ensure_status_column(conn)
+            _ensure_user_scoped_data(conn)
             user_id = session["user_id"]
 
-            # Get user's groups
             groups_data = []
             groups = conn.execute(
                 """
-                SELECT g.* FROM groups g
+                SELECT g.id, g.name, g.join_code, g.created_at FROM groups g
                 JOIN group_members gm ON gm.group_id = g.id
                 WHERE gm.user_id = ?
                 ORDER BY g.created_at DESC
@@ -841,59 +940,52 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
                     """,
                     (group["id"],),
                 ).fetchall()
-
-                # Get today's stats for each member
-                today = datetime.now(timezone.utc).date().isoformat()
-                members_with_stats = []
-                for member in members:
-                    todos_done = conn.execute(
-                        """
-                        SELECT COUNT(*) AS n FROM todos
-                        WHERE user_id = ? AND done = 1
-                          AND DATE(created_at) = ?
-                        """,
-                        (member["id"], today),
-                    ).fetchone()["n"]
-
-                    habits_logged = conn.execute(
-                        """
-                        SELECT COUNT(*) AS n FROM habit_completions hc
-                        JOIN habits h ON h.id = hc.habit_id
-                        WHERE h.user_id = ? AND hc.date_ymd = ?
-                        """,
-                        (member["id"], today),
-                    ).fetchone()["n"]
-
-                    members_with_stats.append({
-                        "id": member["id"],
-                        "username": member["username"],
-                        "todos_done_today": todos_done,
-                        "habits_logged_today": habits_logged,
-                    })
-
                 groups_data.append({
                     "id": group["id"],
                     "name": group["name"],
-                    "members": members_with_stats,
+                    "join_code": group["join_code"],
+                    "member_count": len(members),
+                    "members": [{"id": member["id"], "username": member["username"]} for member in members],
                 })
 
-            # Get user's friends
-            friends = conn.execute(
+            shared_rows = conn.execute(
                 """
-                SELECT u.* FROM users u
-                JOIN friendships f ON f.friend_id = u.id
-                WHERE f.user_id = ?
-                ORDER BY u.username
+                SELECT
+                  t.id,
+                  t.task,
+                  t.status,
+                  t.done,
+                  t.category,
+                  t.due_date,
+                  t.notion_page_id,
+                  t.created_at,
+                  u.username AS owner_username
+                FROM todos t
+                JOIN users u ON u.id = t.user_id
+                WHERE t.user_id IN (
+                  SELECT DISTINCT gm_other.user_id
+                  FROM group_members gm_self
+                  JOIN group_members gm_other ON gm_other.group_id = gm_self.group_id
+                  WHERE gm_self.user_id = ?
+                    AND gm_other.user_id != ?
+                )
+                ORDER BY t.created_at DESC
+                LIMIT 300
                 """,
-                (user_id,),
+                (user_id, user_id),
             ).fetchall()
+            shared_columns = {"to_do": [], "doing": [], "done": []}
+            for row in shared_rows:
+                todo = _todo_view(row, owner_username=row["owner_username"])
+                shared_columns.setdefault(row["status"], shared_columns["to_do"]).append(todo)
 
             return render_template(
                 "social.html",
                 active_page="social",
                 groups=groups_data,
-                friends=[{"id": f["id"], "username": f["username"]} for f in friends],
-                discord_link_code=request.args.get("discord_link_code"),
+                shared_columns=shared_columns,
+                notice=request.args.get("notice"),
+                error=request.args.get("error"),
             )
         finally:
             conn.close()
@@ -903,63 +995,70 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
     def social_create_group():
         name = request.form.get("name", "").strip()
         if not name:
-            return redirect(url_for("social"))
+            return redirect(url_for("social", error="Group name is required."))
 
-        conn = _connect(app.config["DB_PATH"])
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
         try:
+            _ensure_auth_tables(conn)
             user_id = session["user_id"]
-            cur = conn.execute(
-                "INSERT INTO groups(name, owner_id, created_at) VALUES (?, ?, ?)",
-                (name, user_id, datetime.now(timezone.utc).isoformat()),
+            join_code = _generate_group_join_code(conn)
+            created_at = datetime.now(timezone.utc).isoformat()
+            group_id = _insert_group(
+                conn,
+                name=name[:120],
+                created_by_user_id=user_id,
+                join_code=join_code,
+                created_at=created_at,
             )
-            group_id = cur.lastrowid
-            # Auto-add creator as member
             conn.execute(
                 "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
-                (group_id, user_id, datetime.now(timezone.utc).isoformat()),
+                (group_id, user_id, created_at),
             )
             conn.commit()
         finally:
             conn.close()
-        return redirect(url_for("social"))
+        return redirect(url_for("social", notice=f"Created {name[:120]}. Share code {join_code}."))
 
-    @app.route("/social/group/<int:group_id>/add_member", methods=["POST"])
+    @app.route("/social/group/join", methods=["POST"])
     @login_required
-    def social_add_member(group_id: int):
-        username = request.form.get("username", "").strip()
-        if not username:
-            return redirect(url_for("social"))
+    def social_join_group():
+        join_code = "".join(ch for ch in request.form.get("join_code", "").upper().strip() if ch.isalnum())
+        if not join_code:
+            return redirect(url_for("social", error="Enter a valid join code."))
 
-        conn = _connect(app.config["DB_PATH"])
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
         try:
-            # Check member count
-            count = conn.execute(
-                "SELECT COUNT(*) AS n FROM group_members WHERE group_id = ?",
-                (group_id,),
-            ).fetchone()["n"]
-            if count >= 10:
-                return redirect(url_for("social"))  # Group full
-
-            # Find user by username
-            target_user = conn.execute(
-                "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
-                (username,),
+            _ensure_auth_tables(conn)
+            user_id = session["user_id"]
+            group = conn.execute(
+                "SELECT id, name FROM groups WHERE join_code = ? LIMIT 1",
+                (join_code,),
             ).fetchone()
-            if not target_user:
-                return redirect(url_for("social"))  # User not found
+            if group is None:
+                return redirect(url_for("social", error="That group code does not exist."))
 
-            # Add to group
-            try:
-                conn.execute(
-                    "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
-                    (group_id, target_user["id"], datetime.now(timezone.utc).isoformat()),
-                )
-                conn.commit()
-            except sqlite3.IntegrityError:
-                pass  # Already a member
+            existing = conn.execute(
+                "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?",
+                (group["id"], user_id),
+            ).fetchone()
+            if existing is not None:
+                return redirect(url_for("social", notice=f"You're already in {group['name']}."))
+
+            member_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM group_members WHERE group_id = ?",
+                (group["id"],),
+            ).fetchone()["n"]
+            if member_count >= 10:
+                return redirect(url_for("social", error="That group is full."))
+
+            conn.execute(
+                "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
+                (group["id"], user_id, datetime.now(timezone.utc).isoformat()),
+            )
+            conn.commit()
         finally:
             conn.close()
-        return redirect(url_for("social"))
+        return redirect(url_for("social", notice=f"Joined {group['name']}."))
 
     @app.route("/social/friend/add", methods=["POST"])
     @login_required

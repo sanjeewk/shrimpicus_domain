@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block page_title %}Account{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-eyebrow">Account</div>
+  <h1 class="page-title">Account information</h1>
+  <p class="page-copy">Your profile summary and Discord link status live here now.</p>
+</section>
+
+{% if notice %}
+<div class="notice">{{ notice }}</div>
+{% endif %}
+{% if error %}
+<div class="notice notice--error">{{ error }}</div>
+{% endif %}
+
+<section class="account-stats">
+  <article class="stat-card">
+    <div class="stat-card__label">Username</div>
+    <div class="stat-card__value">{{ user.username }}</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-card__label">Completed Tasks</div>
+    <div class="stat-card__value">{{ completed_tasks }}</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-card__label">Discord ID</div>
+    <div class="stat-card__value stat-card__value--small">{{ user.discord_user_id or 'Not linked' }}</div>
+  </article>
+</section>
+
+<section class="info-grid">
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">Discord Link</h2>
+      <p class="panel__text">Generate a one-time code, then DM it to the bot in Discord with <code>!link CODE</code>.</p>
+    </div>
+    {% if discord_link_code %}
+    <div class="link-code">!link {{ discord_link_code }}</div>
+    <p class="panel__text">This code expires in 15 minutes and can only be used once.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('discord_link') }}">
+      <button class="primary-btn" type="submit">Generate Discord Link Code</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">Status</h2>
+      <p class="panel__text">Once your Discord account is linked, this page will continue to show the linked Discord ID and your completed-task total.</p>
+    </div>
+    <div class="group-members">
+      <span class="group-members__item">Username: {{ user.username }}</span>
+      <span class="group-members__item">Completed: {{ completed_tasks }}</span>
+      <span class="group-members__item">Discord: {{ user.discord_user_id or 'Not linked' }}</span>
+    </div>
+  </article>
+</section>
+{% endblock %}

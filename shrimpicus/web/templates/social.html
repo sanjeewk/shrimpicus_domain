@@ -1,116 +1,115 @@
 {% extends "base.html" %}
-
-{% block title %}Social - Shrimpicus{% endblock %}
+{% block page_title %}Social{% endblock %}
 
 {% block content %}
-<div style="padding: 2rem;">
-    <h1 style="color: #0ff; margin-bottom: 2rem;">Social</h1>
+<section class="page-header">
+  <div class="page-eyebrow">Social</div>
+  <h1 class="page-title">Shared groups and shared tasks</h1>
+  <p class="page-copy">Create a group, share its join code, or enter a code to see what everyone else in your groups is working on.</p>
+</section>
 
-    <section style="background: rgba(0,0,0,0.3); border: 1px solid #0ff; padding: 1rem; margin-bottom: 2rem; border-radius: 8px;">
-        <h2 style="color: #ff00ff; margin-bottom: 0.75rem;">Discord Link</h2>
-        <p style="color: #ccc; margin: 0 0 1rem;">Link this web account to Discord so DMs and server-channel messages update your private todos only.</p>
-        {% if discord_link_code %}
-        <div style="background: rgba(0,0,0,0.5); border: 1px solid #ffcc00; padding: 0.75rem; margin-bottom: 1rem; color: #fff;">
-            In Discord, send: <code style="color: #ffcc00; font-weight: bold;">!link {{ discord_link_code }}</code>
-            <div style="color: #999; font-size: 0.8rem; margin-top: 0.4rem;">This code expires in 15 minutes and can be used once.</div>
+{% if notice %}
+<div class="notice">{{ notice }}</div>
+{% endif %}
+{% if error %}
+<div class="notice notice--error">{{ error }}</div>
+{% endif %}
+
+<section class="info-grid">
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">Create Group</h2>
+      <p class="panel__text">Start a new group and get a code you can send to other users.</p>
+    </div>
+    <form class="stack-form" method="post" action="{{ url_for('social_create_group') }}">
+      <input class="text-input" type="text" name="name" maxlength="120" placeholder="Weekend sprint" required>
+      <button class="primary-btn" type="submit">Create Group</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">Join Group</h2>
+      <p class="panel__text">Enter a join code from another user to join their group.</p>
+    </div>
+    <form class="stack-form" method="post" action="{{ url_for('social_join_group') }}">
+      <input class="text-input text-input--mono" type="text" name="join_code" maxlength="12" placeholder="ABCD2345" required>
+      <button class="secondary-btn" type="submit">Join Group</button>
+    </form>
+  </article>
+</section>
+
+<section class="panel panel--spaced">
+  <div class="panel__header">
+    <h2 class="panel__title">Your Groups</h2>
+    <p class="panel__text">Each group shows its shareable code and current members.</p>
+  </div>
+  {% if groups %}
+  <div class="group-list">
+    {% for group in groups %}
+    <article class="group-card">
+      <div class="group-card__top">
+        <div>
+          <h3 class="group-card__title">{{ group.name }}</h3>
+          <div class="group-card__meta">
+            <span class="chip chip--owner">Code {{ group.join_code }}</span>
+            <span class="chip">{{ group.member_count }} member{{ '' if group.member_count == 1 else 's' }}</span>
+          </div>
         </div>
-        {% endif %}
-        <form method="POST" action="{{ url_for('discord_link') }}">
-            <button type="submit" style="padding: 0.5rem 1rem; background: #0ff; color: #000; border: none; cursor: pointer; font-weight: bold;">
-                Generate Discord Link Code
-            </button>
-        </form>
-    </section>
+      </div>
+      <div class="group-members">
+        {% for member in group.members %}
+        <span class="group-members__item">{{ member.username }}</span>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">You are not in any groups yet. Create one above or join with a code.</div>
+  {% endif %}
+</section>
 
-    <!-- Groups Section -->
-    <section style="margin-bottom: 3rem;">
-        <h2 style="color: #ff00ff; margin-bottom: 1rem;">Your Groups</h2>
+<section class="page-header page-header--compact">
+  <div class="page-eyebrow">Group Tasks</div>
+  <h2 class="page-title page-title--small">Tasks from other members</h2>
+  <p class="page-copy">This mirrors the board view, but each card is tagged with the member who owns it.</p>
+</section>
 
-        <!-- Create Group Form -->
-        <div style="background: rgba(0,0,0,0.3); border: 1px solid #0ff; padding: 1rem; margin-bottom: 1rem;">
-            <form method="POST" action="{{ url_for('social_create_group') }}" style="display: flex; gap: 0.5rem;">
-                <input type="text" name="name" placeholder="Group name" required
-                    style="flex: 1; padding: 0.5rem; background: rgba(0,0,0,0.5); border: 1px solid #0ff; color: #fff;">
-                <button type="submit" style="padding: 0.5rem 1rem; background: #0ff; color: #000; border: none; cursor: pointer;">
-                    Create Group
-                </button>
-            </form>
-        </div>
-
-        <!-- Groups List -->
-        {% if groups %}
-        <div style="display: grid; gap: 1rem;">
-            {% for group in groups %}
-            <div style="background: rgba(0,0,0,0.3); border: 2px solid #0ff; padding: 1.5rem; border-radius: 8px;">
-                <h3 style="color: #ffcc00; margin-bottom: 1rem;">{{ group.name }}</h3>
-
-                <!-- Add Member Form -->
-                <form method="POST" action="{{ url_for('social_add_member', group_id=group.id) }}"
-                    style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
-                    <input type="text" name="username" placeholder="Add member by username"
-                        style="flex: 1; padding: 0.4rem; background: rgba(0,0,0,0.5); border: 1px solid #0ff; color: #fff; font-size: 0.8rem;">
-                    <button type="submit" style="padding: 0.4rem 0.8rem; background: #ff00ff; color: #000; border: none; cursor: pointer; font-size: 0.8rem;">
-                        Add
-                    </button>
-                </form>
-
-                <!-- Members List -->
-                <div style="display: grid; gap: 0.5rem;">
-                    {% for member in group.members %}
-                    <div style="background: rgba(0,0,0,0.5); padding: 0.75rem; border-left: 3px solid #0ff; display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <span style="color: #0ff; font-weight: bold;">{{ member.username }}</span>
-                            <span style="color: #999; margin-left: 1rem; font-size: 0.8rem;">
-                                📝 {{ member.todos_done_today }} todos |
-                                ✅ {{ member.habits_logged_today }} habits
-                            </span>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-
-                <div style="margin-top: 0.5rem; color: #999; font-size: 0.7rem;">
-                    {{ group.members|length }} / 10 members
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <div style="color: #999; text-align: center; padding: 2rem;">
-            No groups yet. Create your first group above!
-        </div>
-        {% endif %}
-    </section>
-
-    <!-- Friends Section -->
-    <section>
-        <h2 style="color: #ff00ff; margin-bottom: 1rem;">Your Friends</h2>
-
-        <!-- Add Friend Form -->
-        <div style="background: rgba(0,0,0,0.3); border: 1px solid #0ff; padding: 1rem; margin-bottom: 1rem;">
-            <form method="POST" action="{{ url_for('social_add_friend') }}" style="display: flex; gap: 0.5rem;">
-                <input type="text" name="username" placeholder="Friend's username" required
-                    style="flex: 1; padding: 0.5rem; background: rgba(0,0,0,0.5); border: 1px solid #0ff; color: #fff;">
-                <button type="submit" style="padding: 0.5rem 1rem; background: #0ff; color: #000; border: none; cursor: pointer;">
-                    Add Friend
-                </button>
-            </form>
-        </div>
-
-        <!-- Friends List -->
-        {% if friends %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem;">
-            {% for friend in friends %}
-            <div style="background: rgba(0,0,0,0.3); border: 1px solid #ff00ff; padding: 1rem; text-align: center; border-radius: 4px;">
-                <div style="color: #ff00ff; font-weight: bold;">{{ friend.username }}</div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <div style="color: #999; text-align: center; padding: 2rem;">
-            No friends yet. Add friends to create groups together!
-        </div>
-        {% endif %}
-    </section>
+<div class="board-toolbar__counts social-counts">
+  <span class="pill pill--todo">To do · {{ shared_columns.to_do|length }}</span>
+  <span class="pill pill--doing">Doing · {{ shared_columns.doing|length }}</span>
+  <span class="pill pill--done">Done · {{ shared_columns.done|length }}</span>
 </div>
+
+<section class="kanban">
+  {% for status, label in [('to_do', 'To do'), ('doing', 'Doing'), ('done', 'Done')] %}
+  <div class="column column--{{ status }}">
+    <div class="column__header">
+      <span class="column__dot" aria-hidden="true"></span>
+      <span class="column__title">{{ label }}</span>
+      <span class="column__count">{{ shared_columns[status]|length }}</span>
+    </div>
+    <ul class="column__list">
+      {% for t in shared_columns[status] %}
+      <li class="card card--static" data-status="{{ t.status }}">
+        <div class="card__id">#{{ "%04d"|format(t.id) }}</div>
+        <div class="card__task">{{ t.task }}</div>
+        <div class="card__meta">
+          <span class="chip chip--time">{{ t.created_human }}</span>
+          {% if t.category %}<span class="chip chip--category">{{ t.category }}</span>{% endif %}
+          {% if t.linked_notion %}<span class="chip chip--notion">notion</span>{% endif %}
+          {% if t.due_date %}
+          <span class="chip chip--due chip--due-{{ t.due_date.state }}">{{ t.due_date.label }}</span>
+          {% endif %}
+        </div>
+        <div class="card__owner">
+          <span class="chip chip--owner">{{ t.owner_username }}</span>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</section>
 {% endblock %}

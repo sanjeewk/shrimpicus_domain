@@ -186,16 +186,18 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_users_username
               ON users(username COLLATE NOCASE);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id
-              ON users(discord_user_id);
 
             CREATE TABLE IF NOT EXISTS groups (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT NOT NULL,
               created_by_user_id INTEGER NOT NULL,
+              join_code TEXT,
               created_at TEXT NOT NULL,
               FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_join_code
+              ON groups(join_code);
 
             CREATE TABLE IF NOT EXISTS group_members (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -377,9 +379,15 @@ class Database:
               id SERIAL PRIMARY KEY,
               name TEXT NOT NULL,
               created_by_user_id INTEGER NOT NULL,
+              join_code TEXT,
               created_at TEXT NOT NULL,
               FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+        """)
+
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_join_code
+              ON groups(join_code);
         """)
 
         cur.execute("""
@@ -447,12 +455,8 @@ class Database:
             return  # PostgreSQL schema is already complete
 
         # Users migration
-        user_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)").fetchall()}
-        if "discord_user_id" not in user_cols:
-            self.conn.execute("ALTER TABLE users ADD COLUMN discord_user_id TEXT")
-        self.conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)"
-        )
+        self._ensure_sqlite_user_discord_column()
+        self._ensure_sqlite_group_columns()
 
         self.conn.execute(
             """
@@ -506,6 +510,57 @@ class Database:
         journal_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(journal_entries)").fetchall()}
         if "user_id" not in journal_cols:
             self.conn.execute("ALTER TABLE journal_entries ADD COLUMN user_id INTEGER DEFAULT 1")
+
+    def _ensure_sqlite_user_discord_column(self) -> None:
+        """Backfill the users.discord_user_id column for older SQLite databases."""
+        if self.is_postgres:
+            return
+        user_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "discord_user_id" not in user_cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN discord_user_id TEXT")
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_user_id ON users(discord_user_id)"
+        )
+
+    def _ensure_sqlite_group_columns(self) -> None:
+        if self.is_postgres:
+            return
+        group_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(groups)").fetchall()}
+        if "created_by_user_id" not in group_cols:
+            self.conn.execute("ALTER TABLE groups ADD COLUMN created_by_user_id INTEGER")
+        if "owner_id" in group_cols:
+            self.conn.execute(
+                """
+                UPDATE groups
+                SET created_by_user_id = owner_id
+                WHERE created_by_user_id IS NULL
+                """
+            )
+        if "join_code" not in group_cols:
+            self.conn.execute("ALTER TABLE groups ADD COLUMN join_code TEXT")
+        missing_codes = self.conn.execute(
+            "SELECT id FROM groups WHERE join_code IS NULL OR TRIM(join_code) = ''"
+        ).fetchall()
+        for row in missing_codes:
+            self.conn.execute(
+                "UPDATE groups SET join_code = ? WHERE id = ?",
+                (self._generate_group_join_code(), row["id"]),
+            )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_join_code ON groups(join_code)"
+        )
+
+    def _generate_group_join_code(self, length: int = 8) -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        for _ in range(24):
+            code = "".join(secrets.choice(alphabet) for _ in range(length))
+            row = self.conn.execute(
+                "SELECT 1 FROM groups WHERE join_code = ? LIMIT 1",
+                (code,),
+            ).fetchone()
+            if row is None:
+                return code
+        raise RuntimeError("Could not create unique group join code")
 
     def add_reminder(
         self,
@@ -818,12 +873,14 @@ class Database:
         ).fetchone()
 
     def get_user_by_discord_id(self, discord_user_id: int | str) -> sqlite3.Row | None:
+        self._ensure_sqlite_user_discord_column()
         return self.conn.execute(
             "SELECT * FROM users WHERE discord_user_id = ? LIMIT 1",
             (str(discord_user_id),),
         ).fetchone()
 
     def get_or_create_user_for_discord(self, discord_user_id: int | str, display_name: str | None = None) -> sqlite3.Row:
+        self._ensure_sqlite_user_discord_column()
         discord_id = str(discord_user_id)
         existing = self.get_user_by_discord_id(discord_id)
         if existing is not None:
@@ -873,6 +930,7 @@ class Database:
         raise RuntimeError("Could not create unique Discord link code")
 
     def consume_discord_link_code(self, code: str, discord_user_id: int | str) -> tuple[bool, str]:
+        self._ensure_sqlite_user_discord_column()
         normalized = "".join(ch for ch in code.upper().strip() if ch.isalnum())
         row = self.conn.execute(
             """
@@ -967,15 +1025,25 @@ class Database:
 
     # --- group management --------------------------------------------------- #
     def create_group(self, name: str, created_by_user_id: int) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO groups(name, created_by_user_id, created_at) VALUES (?, ?, ?)",
-            (name, created_by_user_id, utc_now_iso()),
-        )
+        self._ensure_sqlite_group_columns()
+        join_code = self._generate_group_join_code()
+        created_at = utc_now_iso()
+        group_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(groups)").fetchall()}
+        if "owner_id" in group_cols:
+            cur = self.conn.execute(
+                "INSERT INTO groups(name, owner_id, created_by_user_id, join_code, created_at) VALUES (?, ?, ?, ?, ?)",
+                (name, created_by_user_id, created_by_user_id, join_code, created_at),
+            )
+        else:
+            cur = self.conn.execute(
+                "INSERT INTO groups(name, created_by_user_id, join_code, created_at) VALUES (?, ?, ?, ?)",
+                (name, created_by_user_id, join_code, created_at),
+            )
         # Auto-add creator to the group
         group_id = int(cur.lastrowid)
         self.conn.execute(
             "INSERT INTO group_members(group_id, user_id, joined_at) VALUES (?, ?, ?)",
-            (group_id, created_by_user_id, utc_now_iso()),
+            (group_id, created_by_user_id, created_at),
         )
         self.conn.commit()
         return group_id
@@ -1024,6 +1092,13 @@ class Database:
         return self.conn.execute(
             "SELECT * FROM groups WHERE id = ? LIMIT 1",
             (group_id,),
+        ).fetchone()
+
+    def get_group_by_join_code(self, join_code: str) -> sqlite3.Row | None:
+        self._ensure_sqlite_group_columns()
+        return self.conn.execute(
+            "SELECT * FROM groups WHERE join_code = ? LIMIT 1",
+            (join_code.upper(),),
         ).fetchone()
 
     def remove_group_member(self, group_id: int, user_id: int) -> None:
