@@ -145,6 +145,7 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 ### Unreleased
 
+- **Combined launcher** — new `shrimpicus-all` entrypoint runs the Discord bot and the Flask web app in one process (web in a daemon thread, bot in the main asyncio loop). Useful for single-command local dev; flags: `--host`, `--port`, `--debug`.
 - **Documentation cleanup** — removed the obsolete duplicate todo fix note now that the behavior is covered by current code and docs.
 - **README artwork and refreshed screenshots** — replaced the project image and updated web UI screenshots.
 - **Discord multi-user isolation** — Discord DMs and server-channel messages now resolve by Discord user ID, enforce private todo ownership, and support one-time web account linking codes.

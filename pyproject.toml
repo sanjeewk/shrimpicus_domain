@@ -30,6 +30,7 @@ shrimpicus = "shrimpicus.main:main"
 shrimpicus-bot = "shrimpicus.main:main"
 shrimpicus-web = "shrimpicus.web.app:main"
 shrimpicus-mcp = "shrimpicus.mcp_server:main"
+shrimpicus-all = "shrimpicus.run_all:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
