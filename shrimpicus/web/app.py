@@ -193,6 +193,80 @@ def _ensure_habit_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_focus_tables(conn: sqlite3.Connection) -> None:
+    """Create the focus / lock-in tables if missing (web-only feature)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS focus_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          creator_user_id INTEGER NOT NULL,
+          duration_minutes INTEGER NOT NULL,
+          started_at TEXT NOT NULL,
+          ends_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(creator_user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS focus_session_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          joined_at TEXT NOT NULL,
+          UNIQUE(session_id, user_id),
+          FOREIGN KEY(session_id) REFERENCES focus_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_focus_sessions_active
+          ON focus_sessions(status, ends_at);
+        CREATE INDEX IF NOT EXISTS idx_focus_members_session
+          ON focus_session_members(session_id);
+        CREATE INDEX IF NOT EXISTS idx_focus_members_user
+          ON focus_session_members(user_id);
+        """
+    )
+    conn.commit()
+
+
+def _focus_reap_completed(conn: sqlite3.Connection) -> None:
+    """Lazily mark any active session whose end time has passed as completed."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE focus_sessions SET status = 'completed' WHERE status = 'active' AND ends_at <= ?",
+        (now,),
+    )
+    conn.commit()
+
+
+def _focus_serialize_session(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    now = datetime.now(timezone.utc)
+    ends = _parse_iso(row["ends_at"]) or now
+    if ends.tzinfo is None:
+        ends = ends.replace(tzinfo=timezone.utc)
+    remaining = max(0, int((ends - now).total_seconds()))
+    creator = conn.execute(
+        "SELECT username FROM users WHERE id = ?", (row["creator_user_id"],)
+    ).fetchone()
+    members = conn.execute(
+        """
+        SELECT u.id, u.username FROM users u
+        JOIN focus_session_members m ON m.user_id = u.id
+        WHERE m.session_id = ?
+        ORDER BY m.joined_at ASC
+        """,
+        (row["id"],),
+    ).fetchall()
+    return {
+        "id": row["id"],
+        "creator_username": creator["username"] if creator else "unknown",
+        "duration_minutes": row["duration_minutes"],
+        "started_at": row["started_at"],
+        "ends_at": row["ends_at"],
+        "remaining_seconds": remaining,
+        "member_count": len(members),
+        "members": [{"id": m["id"], "username": m["username"]} for m in members],
+    }
+
+
 def _ensure_auth_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -1094,6 +1168,190 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
         finally:
             conn.close()
         return redirect(url_for("social"))
+
+    # ---------------- Focus / lock-in ---------------- #
+
+    def _focus_state(conn: sqlite3.Connection, user_id: int) -> dict:
+        _focus_reap_completed(conn)
+        current = conn.execute(
+            """
+            SELECT s.* FROM focus_sessions s
+            JOIN focus_session_members m ON m.session_id = s.id
+            WHERE m.user_id = ? AND s.status = 'active'
+            ORDER BY s.ends_at ASC LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        active = conn.execute(
+            """
+            SELECT s.* FROM focus_sessions s
+            WHERE s.status = 'active'
+            ORDER BY s.ends_at ASC
+            """
+        ).fetchall()
+        return {
+            "current": _focus_serialize_session(conn, current) if current else None,
+            "active": [_focus_serialize_session(conn, r) for r in active],
+        }
+
+    @app.route("/focus")
+    @login_required
+    def focus():
+        user_id = session.get("user_id")
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
+        try:
+            _ensure_auth_tables(conn)
+            _ensure_focus_tables(conn)
+            groups = conn.execute(
+                """
+                SELECT g.id, g.name FROM groups g
+                JOIN group_members gm ON gm.group_id = g.id
+                WHERE gm.user_id = ?
+                ORDER BY g.name
+                """,
+                (user_id,),
+            ).fetchall()
+            state = _focus_state(conn, user_id)
+            return render_template(
+                "focus.html",
+                active_page="focus",
+                groups=[{"id": g["id"], "name": g["name"]} for g in groups],
+                state=state,
+            )
+        finally:
+            conn.close()
+
+    @app.route("/focus/start", methods=["POST"])
+    @login_required
+    def focus_start():
+        user_id = session.get("user_id")
+        payload = request.get_json(silent=True) or {}
+        try:
+            duration = int(payload.get("duration") or 25)
+        except (TypeError, ValueError):
+            return jsonify({"error": "duration must be a number"}), 400
+        if duration < 1 or duration > 180:
+            return jsonify({"error": "duration must be between 1 and 180 minutes"}), 400
+        group_id = payload.get("group_id")
+
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
+        try:
+            _ensure_auth_tables(conn)
+            _ensure_focus_tables(conn)
+
+            # If the user is already in an active session, leave it first.
+            conn.execute(
+                """
+                DELETE FROM focus_session_members
+                WHERE user_id = ? AND session_id IN (
+                  SELECT id FROM focus_sessions WHERE status = 'active'
+                )
+                """,
+                (user_id,),
+            )
+
+            now = datetime.now(timezone.utc)
+            started_at = now.isoformat()
+            ends_at = (now + timedelta(minutes=duration)).isoformat()
+            cur = conn.execute(
+                """
+                INSERT INTO focus_sessions
+                  (creator_user_id, duration_minutes, started_at, ends_at, status, created_at)
+                VALUES (?, ?, ?, ?, 'active', ?)
+                """,
+                (user_id, duration, started_at, ends_at, started_at),
+            )
+            session_id = int(cur.lastrowid)
+
+            # Always add the creator as a member.
+            conn.execute(
+                "INSERT INTO focus_session_members(session_id, user_id, joined_at) VALUES (?, ?, ?)",
+                (session_id, user_id, started_at),
+            )
+
+            # Optionally invite an entire group.
+            invited = 0
+            if group_id:
+                members = conn.execute(
+                    "SELECT user_id FROM group_members WHERE group_id = ? AND user_id != ?",
+                    (group_id, user_id),
+                ).fetchall()
+                for m in members:
+                    try:
+                        conn.execute(
+                            "INSERT INTO focus_session_members(session_id, user_id, joined_at) VALUES (?, ?, ?)",
+                            (session_id, m["user_id"], started_at),
+                        )
+                        invited += 1
+                    except sqlite3.IntegrityError:
+                        pass
+            conn.commit()
+
+            row = conn.execute("SELECT * FROM focus_sessions WHERE id = ?", (session_id,)).fetchone()
+            return jsonify(_focus_serialize_session(conn, row))
+        finally:
+            conn.close()
+
+    @app.route("/focus/<int:session_id>/join", methods=["POST"])
+    @login_required
+    def focus_join(session_id: int):
+        user_id = session.get("user_id")
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
+        try:
+            _ensure_focus_tables(conn)
+            _focus_reap_completed(conn)
+            row = conn.execute(
+                "SELECT * FROM focus_sessions WHERE id = ? AND status = 'active'",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return jsonify({"error": "session not found or no longer active"}), 404
+            # Leave any other active session first.
+            conn.execute(
+                """
+                DELETE FROM focus_session_members
+                WHERE user_id = ? AND session_id != ?
+                """,
+                (user_id, session_id),
+            )
+            try:
+                conn.execute(
+                    "INSERT INTO focus_session_members(session_id, user_id, joined_at) VALUES (?, ?, ?)",
+                    (session_id, user_id, datetime.now(timezone.utc).isoformat()),
+                )
+            except sqlite3.IntegrityError:
+                pass
+            conn.commit()
+            return jsonify(_focus_serialize_session(conn, row))
+        finally:
+            conn.close()
+
+    @app.route("/focus/<int:session_id>/leave", methods=["POST"])
+    @login_required
+    def focus_leave(session_id: int):
+        user_id = session.get("user_id")
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
+        try:
+            _ensure_focus_tables(conn)
+            conn.execute(
+                "DELETE FROM focus_session_members WHERE session_id = ? AND user_id = ?",
+                (session_id, user_id),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/focus/state")
+    @login_required
+    def focus_state_api():
+        user_id = session.get("user_id")
+        conn = _connect(app.config["DB_PATH"], app.config.get("DATABASE_URL", ""))
+        try:
+            _ensure_focus_tables(conn)
+            return jsonify(_focus_state(conn, user_id))
+        finally:
+            conn.close()
 
     return app
 

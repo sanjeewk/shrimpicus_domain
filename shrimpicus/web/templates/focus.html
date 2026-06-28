@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block page_title %}Focus{% endblock %}
+
+{% block head %}
+<script id="focusBootstrap" type="application/json">{{ state | tojson }}</script>
+<script id="focusGroups" type="application/json">{{ groups | tojson }}</script>
+{% endblock %}
+
+{% block content %}
+<section class="focus">
+  <!-- LEFT: controls + active sessions -->
+  <aside class="focus__panel">
+    <div class="focus__panel-block">
+      <h2 class="focus__panel-title">Set up your lock-in</h2>
+      <label class="focus__field">
+        <span>Duration (minutes)</span>
+        <input type="number" id="focusDuration" min="1" max="180" value="25" inputmode="numeric" />
+      </label>
+      <label class="focus__field">
+        <span>Invite a group</span>
+        <select id="focusGroup">
+          <option value="">Just me</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}">{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="focus__hint">Tap the big LOCK IN button to start. Friends in the invited group are added automatically.</p>
+    </div>
+
+    <div class="focus__panel-block">
+      <h2 class="focus__panel-title">Active lock-ins</h2>
+      <ul class="focus__sessions" id="focusSessions">
+        <li class="focus__empty">No one is locked in right now.</li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- CENTER: button / timer / celebration -->
+  <div class="focus__stage" id="focusStage">
+    <!-- idle: big button -->
+    <button type="button" class="lockin-btn" id="lockinBtn" data-state="idle">
+      <span class="lockin-btn__label">LOCK IN</span>
+      <span class="lockin-btn__sub">press to begin</span>
+    </button>
+
+    <!-- active: timer + quote -->
+    <div class="focus__active" id="focusActive" hidden>
+      <div class="focus__timer" id="focusTimer">00:00</div>
+      <div class="focus__meta" id="focusMeta"></div>
+      <p class="focus__quote" id="focusQuote"></p>
+      <button type="button" class="focus__abort" id="focusAbort">Throw in the towel</button>
+    </div>
+
+    <!-- completed -->
+    <div class="focus__done" id="focusDone" hidden>
+      <p class="focus__done-caption">good job you're a star</p>
+      <button type="button" class="focus__abort" id="focusDismiss">Lock in again</button>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='focus.js') }}"></script>
+{% endblock %}
