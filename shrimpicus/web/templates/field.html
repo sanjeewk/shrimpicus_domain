@@ -3,29 +3,23 @@
 
 {% block content %}
 <section class="field" data-done-count="{{ done_count }}">
-  <div class="field__sky"></div>
-  <div class="field__sun" aria-hidden="true"></div>
-  <div class="field__clouds" aria-hidden="true">
+  <div class="field__sky" aria-hidden="true">
+    <span class="field__sun"></span>
     <span class="cloud cloud--a"></span>
     <span class="cloud cloud--b"></span>
     <span class="cloud cloud--c"></span>
   </div>
-  <div class="field__hills" aria-hidden="true"></div>
-  <div class="field__ground">
-    <div class="field__grass"></div>
-    <div class="field__flowers" id="flowers" aria-hidden="true"></div>
-    <div class="field__fence" aria-hidden="true"></div>
+  <div class="field__meadow">
+    <div class="field__ledge" aria-hidden="true"></div>
+    <div class="field__flowers" id="flowers" role="img" aria-label="A meadow of flowers, one for each completed task"></div>
+    <div class="field__dog-layer" id="dogLayer" aria-hidden="true"></div>
   </div>
 
   <div class="field__hud">
     <div class="field__counter">
-      <span class="field__counter-label">FLOWERS</span>
+      <span class="field__counter-label">FLOWERS BLOOMED</span>
       <span class="field__counter-value" id="flowerCount">{{ done_count }}</span>
     </div>
-    <button type="button" class="field__audio" id="audioToggle" aria-pressed="false">
-      <span class="field__audio-icon" aria-hidden="true">♪</span>
-      <span class="field__audio-text">MUSIC: OFF</span>
-    </button>
     <details class="field__debug">
       <summary>DEBUG</summary>
       <label class="field__debug-row">
@@ -34,6 +28,10 @@
         <input type="number" id="flowerNumber" min="0" max="2000" step="1" value="{{ done_count }}" />
       </label>
       <button type="button" id="flowerReset" class="field__debug-reset">Reset to {{ done_count }}</button>
+      <label class="field__debug-toggle">
+        <input type="checkbox" id="dogToggle" checked />
+        <span>Let the dog run free</span>
+      </label>
     </details>
   </div>
 </section>

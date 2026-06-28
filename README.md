@@ -145,6 +145,7 @@ Existing todos, reminders, habits, and other data automatically belong to **User
 
 ### Unreleased
 
+- **Field redesign** — the Field page is now a peaceful anime/Stardew-style meadow: warm dawn sky, drifting clouds, flapping birds, and big swaying flowers (5 species, varied pastel palettes), one per completed task. Flowers are interactive — hover to grow, click to bloom-burst with petals + a soft chime. A roaming dog trots the meadow, toggleable from the DEBUG panel alongside the existing flower-count slider.
 - **Group join codes + Account page** — groups now generate a unique shareable join code (e.g. `ABCD2345`); members join via code instead of being added by username. Schema migrates `groups.owner_id` → `created_by_user_id` and backfills codes. New `/account` page surfaces completed-task count and the Discord linking flow (moved off `/social`). The `/social` page now shows a shared-todo board aggregating every member's todos across all your groups.
 - **Combined launcher** — new `shrimpicus-all` entrypoint runs the Discord bot and the Flask web app in one process (web in a daemon thread, bot in the main asyncio loop). Useful for single-command local dev; flags: `--host`, `--port`, `--debug`.
 - **Documentation cleanup** — removed the obsolete duplicate todo fix note now that the behavior is covered by current code and docs.
