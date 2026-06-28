@@ -32,6 +32,11 @@ class Reminder:
     status: str
     poll_required: bool
     poll_id: str | None
+    recur_kind: str | None = None
+    recur_dow: int | None = None
+    recur_dom: int | None = None
+    recur_time: str | None = None
+    last_fired_at: str | None = None
 
 
 class Database:
@@ -272,6 +277,18 @@ class Database:
               ON reminders(poll_id);
         """)
 
+        # Recurring-reminder columns (added lazily for existing Postgres DBs)
+        for col, decl in (
+            ("recur_kind", "TEXT"),
+            ("recur_dow", "INTEGER"),
+            ("recur_dom", "INTEGER"),
+            ("recur_time", "TEXT"),
+            ("last_fired_at", "TEXT"),
+        ):
+            cur.execute(
+                f"ALTER TABLE reminders ADD COLUMN IF NOT EXISTS {col} {decl}"
+            )
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
               id SERIAL PRIMARY KEY,
@@ -281,6 +298,10 @@ class Database:
               created_at TEXT NOT NULL
             );
         """)
+
+        cur.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC'"
+        )
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_users_username
@@ -493,6 +514,21 @@ class Database:
         reminder_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(reminders)").fetchall()}
         if "user_id" not in reminder_cols:
             self.conn.execute("ALTER TABLE reminders ADD COLUMN user_id INTEGER DEFAULT 1")
+        if "recur_kind" not in reminder_cols:
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN recur_kind TEXT")
+        if "recur_dow" not in reminder_cols:
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN recur_dow INTEGER")
+        if "recur_dom" not in reminder_cols:
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN recur_dom INTEGER")
+        if "recur_time" not in reminder_cols:
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN recur_time TEXT")
+        if "last_fired_at" not in reminder_cols:
+            self.conn.execute("ALTER TABLE reminders ADD COLUMN last_fired_at TEXT")
+
+        # Users.timezone migration
+        user_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "timezone" not in user_cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'")
 
         # Habits migration
         habit_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(habits)").fetchall()}
@@ -590,51 +626,61 @@ class Database:
     def list_reminders(self, user_id: int, limit: int = 20) -> list[Reminder]:
         cur = self._get_cursor()
         query = self._param("""
-            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id
+            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id,
+                   recur_kind, recur_dow, recur_dom, recur_time, last_fired_at
             FROM reminders
             WHERE user_id = ?
             ORDER BY due_at ASC
             LIMIT ?
         """)
         rows = cur.execute(query, (user_id, limit)).fetchall()
-        return [
-            Reminder(
-                id=row["id"],
-                chat_id=row["chat_id"],
-                user_id=row["user_id"],
-                content=row["content"],
-                due_at=row["due_at"],
-                status=row["status"],
-                poll_required=bool(row["poll_required"]),
-                poll_id=row["poll_id"],
-            )
-            for row in rows
-        ]
+        return [self._row_to_reminder(row) for row in rows]
+
+    def list_recurring_reminders(self, user_id: int) -> list[Reminder]:
+        cur = self._get_cursor()
+        query = self._param("""
+            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id,
+                   recur_kind, recur_dow, recur_dom, recur_time, last_fired_at
+            FROM reminders
+            WHERE user_id = ? AND recur_kind IS NOT NULL
+            ORDER BY due_at ASC
+        """)
+        rows = cur.execute(query, (user_id,)).fetchall()
+        if self.is_postgres:
+            cur.close()
+        return [self._row_to_reminder(row) for row in rows]
 
     def due_reminders(self, now_iso: str) -> list[Reminder]:
-        rows = self.conn.execute(
-            """
-            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id
+        cur = self._get_cursor()
+        query = self._param("""
+            SELECT id, chat_id, user_id, content, due_at, status, poll_required, poll_id,
+                   recur_kind, recur_dow, recur_dom, recur_time, last_fired_at
             FROM reminders
             WHERE due_at <= ?
               AND status = 'pending'
             ORDER BY due_at ASC
-            """,
-            (now_iso,),
-        ).fetchall()
-        return [
-            Reminder(
-                id=row["id"],
-                chat_id=row["chat_id"],
-                user_id=row["user_id"],
-                content=row["content"],
-                due_at=row["due_at"],
-                status=row["status"],
-                poll_required=bool(row["poll_required"]),
-                poll_id=row["poll_id"],
-            )
-            for row in rows
-        ]
+        """)
+        rows = cur.execute(query, (now_iso,)).fetchall()
+        if self.is_postgres:
+            cur.close()
+        return [self._row_to_reminder(row) for row in rows]
+
+    def _row_to_reminder(self, row) -> Reminder:
+        return Reminder(
+            id=row["id"],
+            chat_id=row["chat_id"],
+            user_id=row["user_id"],
+            content=row["content"],
+            due_at=row["due_at"],
+            status=row["status"],
+            poll_required=bool(row["poll_required"]),
+            poll_id=row["poll_id"],
+            recur_kind=row["recur_kind"],
+            recur_dow=row["recur_dow"],
+            recur_dom=row["recur_dom"],
+            recur_time=row["recur_time"],
+            last_fired_at=row["last_fired_at"],
+        )
 
     def mark_reminder_notified(self, reminder_id: int) -> None:
         self.conn.execute("UPDATE reminders SET status = 'notified' WHERE id = ?", (reminder_id,))
@@ -666,6 +712,107 @@ class Database:
             (next_due_iso, reminder_id),
         )
         self.conn.commit()
+
+    def add_recurring_reminder(
+        self,
+        user_id: int,
+        chat_id: int,
+        content: str,
+        recur_kind: str,
+        recur_time: str,
+        first_due_utc_iso: str,
+        recur_dow: int | None = None,
+        recur_dom: int | None = None,
+        poll_required: bool = True,
+    ) -> int:
+        cur = self._get_cursor()
+        query = self._param("""
+            INSERT INTO reminders
+              (chat_id, content, due_at, status, poll_required, created_at, user_id,
+               recur_kind, recur_dow, recur_dom, recur_time)
+            VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+        """)
+        cur.execute(
+            query,
+            (
+                chat_id, content, first_due_utc_iso,
+                1 if poll_required else 0, utc_now_iso(), user_id,
+                recur_kind, recur_dow, recur_dom, recur_time,
+            ),
+        )
+        self.conn.commit()
+
+        if self.is_postgres:
+            cur.execute("SELECT lastval()")
+            row_id = cur.fetchone()[0]
+            cur.close()
+            return int(row_id)
+        row_id = cur.lastrowid
+        cur.close()
+        return int(row_id)
+
+    def rearm_reminder(
+        self, reminder_id: int, next_due_utc_iso: str, last_fired_utc_iso: str
+    ) -> None:
+        """Re-arm a recurring reminder: status back to pending, due_at advanced,
+        poll_id cleared so a fresh button view can be attached next fire."""
+        cur = self._get_cursor()
+        query = self._param("""
+            UPDATE reminders
+            SET due_at = ?, status = 'pending', poll_id = NULL, last_fired_at = ?
+            WHERE id = ?
+        """)
+        cur.execute(query, (next_due_utc_iso, last_fired_utc_iso, reminder_id))
+        self.conn.commit()
+        if self.is_postgres:
+            cur.close()
+
+    def get_reminder(self, reminder_id: int, user_id: int | None = None):
+        """Fetch a single reminder row. If user_id is given, scope to that user."""
+        cur = self._get_cursor()
+        if user_id is None:
+            query = self._param(
+                "SELECT * FROM reminders WHERE id = ? LIMIT 1"
+            )
+            row = cur.execute(query, (reminder_id,)).fetchone()
+        else:
+            query = self._param(
+                "SELECT * FROM reminders WHERE id = ? AND user_id = ? LIMIT 1"
+            )
+            row = cur.execute(query, (reminder_id, user_id)).fetchone()
+        if self.is_postgres:
+            cur.close()
+        return row
+
+    def delete_reminder(self, reminder_id: int, user_id: int) -> bool:
+        cur = self._get_cursor()
+        query = self._param("DELETE FROM reminders WHERE id = ? AND user_id = ?")
+        cur.execute(query, (reminder_id, user_id))
+        self.conn.commit()
+        affected = cur.rowcount
+        if self.is_postgres:
+            cur.close()
+        return affected > 0
+
+    def get_user_timezone(self, user_id: int) -> str:
+        cur = self._get_cursor()
+        query = self._param("SELECT timezone FROM users WHERE id = ? LIMIT 1")
+        row = cur.execute(query, (user_id,)).fetchone()
+        if self.is_postgres:
+            cur.close()
+        if row is None:
+            return "UTC"
+        return row["timezone"] or "UTC"
+
+    def set_user_timezone(self, user_id: int, tz: str) -> bool:
+        cur = self._get_cursor()
+        query = self._param("UPDATE users SET timezone = ? WHERE id = ?")
+        cur.execute(query, (tz, user_id))
+        self.conn.commit()
+        affected = cur.rowcount
+        if self.is_postgres:
+            cur.close()
+        return affected > 0
 
     def add_todo(
         self,

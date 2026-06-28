@@ -17,6 +17,42 @@ from shrimpicus.db import Database
 VALID_STATUSES = ("to_do", "doing", "done")
 GROUP_JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+# Curated list of common timezones for the account dropdown. Any IANA name is
+# accepted on POST, but the dropdown keeps the UI manageable.
+TIMEZONE_CHOICES: list[tuple[str, str]] = [
+    ("UTC", "UTC"),
+    ("Europe/London", "London / Lisbon / GMT"),
+    ("Europe/Paris", "Paris / Berlin / Madrid / Rome (CET)"),
+    ("Europe/Athens", "Athens / Helsinki / Bucharest (EET)"),
+    ("Europe/Moscow", "Moscow / Istanbul (MSK)"),
+    ("Asia/Dubai", "Dubai / Gulf (GST)"),
+    ("Asia/Karachi", "Pakistan (PKT)"),
+    ("Asia/Kolkata", "India / Sri Lanka (IST)"),
+    ("Asia/Kathmandu", "Nepal (NPT)"),
+    ("Asia/Dhaka", "Bangladesh (BST)"),
+    ("Asia/Bangkok", "Thailand / Vietnam / Indonesia (ICT)"),
+    ("Asia/Shanghai", "China / Singapore / Hong Kong (CST)"),
+    ("Asia/Tokyo", "Japan / Korea (JST)"),
+    ("Australia/Perth", "Western Australia (AWST)"),
+    ("Australia/Adelaide", "South Australia (ACST)"),
+    ("Australia/Sydney", "Eastern Australia (AEST)"),
+    ("Pacific/Auckland", "New Zealand (NZST)"),
+    ("Pacific/Honolulu", "Hawaii (HST)"),
+    ("America/Anchorage", "Alaska (AKST)"),
+    ("America/Los_Angeles", "Pacific Time (PST)"),
+    ("America/Denver", "Mountain Time (MST)"),
+    ("America/Chicago", "Central Time (CST)"),
+    ("America/New_York", "Eastern Time (EST)"),
+    ("America/Halifax", "Atlantic Time (AST)"),
+    ("America/Sao_Paulo", "Brazil (BRT)"),
+    ("America/Argentina/Buenos_Aires", "Argentina (ART)"),
+    ("America/St_Johns", "Newfoundland (NST)"),
+    ("America/Mexico_City", "Mexico City (CST)"),
+    ("Africa/Casablanca", "Morocco / West Africa"),
+    ("Africa/Johannesburg", "South Africa (SAST)"),
+    ("Africa/Nairobi", "East Africa (EAT)"),
+]
+
 
 def _connect(db_path: Path, database_url: str = "") -> sqlite3.Connection:
     """Connect to database. Uses Database class for compatibility but returns raw connection."""
@@ -630,12 +666,35 @@ def create_app(db_path: Path | None = None, database_url: str | None = None) -> 
                 active_page="account",
                 user=user,
                 completed_tasks=completed_tasks,
+                timezone_options=TIMEZONE_CHOICES,
                 discord_link_code=request.args.get("discord_link_code"),
                 notice=request.args.get("notice"),
                 error=request.args.get("error"),
             )
         finally:
             conn.close()
+
+    @app.route("/account/timezone", methods=["POST"])
+    @login_required
+    def set_timezone():
+        tz = (request.form.get("timezone") or "").strip()
+        user_id = session["user_id"]
+        if not tz:
+            return redirect(url_for("account", error="No timezone provided."))
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(tz)  # raises on unknown name
+        except Exception:
+            return redirect(url_for("account", error=f"Unknown timezone: {tz}"))
+        db = Database(app.config["DB_PATH"], database_url=app.config.get("DATABASE_URL") or None)
+        try:
+            db.init()
+            ok = db.set_user_timezone(user_id, tz)
+        finally:
+            db.conn.close()
+        if ok:
+            return redirect(url_for("account", notice=f"Timezone set to {tz}."))
+        return redirect(url_for("account", error="Could not set timezone."))
 
     @app.route("/discord/link", methods=["POST"])
     @login_required

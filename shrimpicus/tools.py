@@ -85,6 +85,34 @@ async def _list_reminders(svc: "AssistantService", user_id: int, args: dict[str,
     return svc.list_reminders_text(user_id)
 
 
+async def _add_recurring_reminder(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    kind = str(args["kind"]).strip().lower()
+    time_str = str(args["time"]).strip()
+    content = str(args.get("content", "")).strip()
+    weekday = args.get("weekday")
+    day_of_month = args.get("day_of_month")
+    if not content:
+        return "Cannot add an empty reminder."
+    return svc.add_recurring_reminder(
+        user_id, kind, time_str, content,
+        weekday=str(weekday) if weekday is not None else None,
+        dom=int(day_of_month) if day_of_month is not None else None,
+        delivery_chat_id=delivery_chat_id,
+    )
+
+
+async def _list_recurring_reminders(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    return svc.list_recurring_reminders_text(user_id)
+
+
+async def _delete_reminder(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
+    try:
+        rid = int(args["reminder_id"])
+    except (KeyError, TypeError, ValueError):
+        return "reminder_id must be an integer."
+    return svc.delete_reminder(rid, user_id)
+
+
 async def _add_habit(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     name = str(args.get("name", "")).strip()
     if not name:
@@ -184,6 +212,64 @@ TOOLS: tuple[Tool, ...] = (
         description="List the user's reminders with their status and due time.",
         parameters={"type": "object", "properties": {}},
         handler=_list_reminders,
+    ),
+    Tool(
+        name="add_recurring_reminder",
+        description=(
+            "Schedule a recurring reminder that fires on a fixed cadence. "
+            "Use for habits like 'standup every Monday 09:00' or 'pay rent "
+            "monthly on the 1st at 10:00'. For one-shot 'in N minutes' "
+            "reminders use add_reminder instead. Times are interpreted in "
+            "the user's configured timezone (default UTC)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["daily", "weekly", "monthly"]},
+                "time": {
+                    "type": "string",
+                    "description": "Local time in HH:MM 24-hour format, e.g. '09:00'.",
+                },
+                "content": {"type": "string", "description": "What to be reminded about."},
+                "weekday": {
+                    "type": "string",
+                    "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                    "description": "Required when kind=weekly. Ignored otherwise.",
+                },
+                "day_of_month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31,
+                    "description": "Required when kind=monthly. Day-of-month; short months clamp to last day.",
+                },
+            },
+            "required": ["kind", "time", "content"],
+        },
+        handler=_add_recurring_reminder,
+    ),
+    Tool(
+        name="list_recurring_reminders",
+        description=(
+            "List only the user's recurring (daily/weekly/monthly) reminders "
+            "with their schedule and next fire time. Use list_reminders for "
+            "all reminders including one-shot."
+        ),
+        parameters={"type": "object", "properties": {}},
+        handler=_list_recurring_reminders,
+    ),
+    Tool(
+        name="delete_reminder",
+        description=(
+            "Permanently delete a reminder by id. Works for both one-shot and "
+            "recurring reminders. Use list_reminders or list_recurring_reminders "
+            "first to find the id."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"reminder_id": {"type": "integer"}},
+            "required": ["reminder_id"],
+        },
+        handler=_delete_reminder,
     ),
     Tool(
         name="add_habit",

@@ -52,6 +52,10 @@ def build_bot(
             "Use !helpme to see commands.\n"
             "Examples:\n"
             "- !remind 45 Prepare slides\n"
+            "- !remind daily 09:00 Standup\n"
+            "- !remind weekly mon 09:00 Weekly review\n"
+            "- !remind monthly 1 10:00 Pay rent\n"
+            "- !timezone Asia/Colombo\n"
             "- !todo add Buy groceries\n"
             "- !birthday add Alice 1998-07-10\n"
             "- !journal Today I felt focused\n"
@@ -62,7 +66,12 @@ def build_bot(
         await ctx.send(
             "Commands:\n"
             "!remind <minutes> <text>\n"
+            "!remind daily <HH:MM> <text>\n"
+            "!remind weekly <weekday> <HH:MM> <text>\n"
+            "!remind monthly <day-of-month> <HH:MM> <text>\n"
+            "!remind delete <id>\n"
             "!list\n"
+            "!timezone [<IANA name, e.g. Europe/London>]\n"
             "!todo add <task>\n"
             "!todo list\n"
             "!todo done <id>\n"
@@ -70,27 +79,122 @@ def build_bot(
             "!birthday list\n"
             "!journal <text>\n"
             "!ask <question>\n"
+            "\nWeekdays: mon/tue/wed/thu/fri/sat/sun (full forms OK).\n"
             "\nYou can also send natural text like: remind me to stretch in 30 minutes"
         )
 
     @bot.command(name="remind")
-    async def cmd_remind(ctx: commands.Context, minutes: int | None = None, *, text: str | None = None) -> None:
-        if minutes is None or text is None:
-            await ctx.send("Usage: !remind <minutes> <text>")
-            return
-        if minutes <= 0:
-            await ctx.send("Minutes must be a positive integer.")
+    async def cmd_remind(ctx: commands.Context, *, text: str | None = None) -> None:
+        if not text:
+            await ctx.send(
+                "Usage:\n"
+                "  !remind <minutes> <text>\n"
+                "  !remind daily <HH:MM> <text>\n"
+                "  !remind weekly <weekday> <HH:MM> <text>\n"
+                "  !remind monthly <day-of-month> <HH:MM> <text>\n"
+                "  !remind delete <id>"
+            )
             return
 
+        tokens = text.split()
         user_id = _user_id_for(ctx.author)
+
+        # Subcommand: delete
+        if tokens[0].lower() == "delete":
+            if len(tokens) < 2:
+                await ctx.send("Usage: !remind delete <id>")
+                return
+            try:
+                rid = int(tokens[1])
+            except ValueError:
+                await ctx.send("Reminder id must be an integer.")
+                return
+            await ctx.send(assistant.delete_reminder(rid, user_id))
+            return
+
+        # Subcommand: daily / weekly / monthly
+        kind = tokens[0].lower()
+        if kind in {"daily", "weekly", "monthly"}:
+            rest = tokens[1:]
+            if kind == "daily":
+                if len(rest) < 2:
+                    await ctx.send("Usage: !remind daily <HH:MM> <text>")
+                    return
+                time_str = rest[0]
+                content = " ".join(rest[1:])
+                result = assistant.add_recurring_reminder(
+                    user_id, "daily", time_str, content, delivery_chat_id=ctx.channel.id
+                )
+                await ctx.send(result)
+                return
+            if kind == "weekly":
+                if len(rest) < 3:
+                    await ctx.send("Usage: !remind weekly <weekday> <HH:MM> <text>")
+                    return
+                weekday = rest[0]
+                time_str = rest[1]
+                content = " ".join(rest[2:])
+                result = assistant.add_recurring_reminder(
+                    user_id, "weekly", time_str, content,
+                    weekday=weekday, delivery_chat_id=ctx.channel.id,
+                )
+                await ctx.send(result)
+                return
+            if kind == "monthly":
+                if len(rest) < 3:
+                    await ctx.send("Usage: !remind monthly <day-of-month> <HH:MM> <text>")
+                    return
+                try:
+                    dom = int(rest[0])
+                except ValueError:
+                    await ctx.send("Day-of-month must be an integer 1-31.")
+                    return
+                time_str = rest[1]
+                content = " ".join(rest[2:])
+                result = assistant.add_recurring_reminder(
+                    user_id, "monthly", time_str, content,
+                    dom=dom, delivery_chat_id=ctx.channel.id,
+                )
+                await ctx.send(result)
+                return
+
+        # Default: one-shot relative reminder "<minutes> <text>"
+        try:
+            minutes = int(tokens[0])
+        except ValueError:
+            await ctx.send(
+                "Usage: !remind <minutes> <text>  |  !remind daily/weekly/monthly ...  |  !remind delete <id>"
+            )
+            return
+        content_text = " ".join(tokens[1:])
+        if minutes <= 0 or not content_text:
+            await ctx.send("Usage: !remind <minutes> <text>")
+            return
         reminder_id = assistant.add_reminder_minutes(
             user_id,
             minutes,
-            text,
+            content_text,
             poll_required=True,
             delivery_chat_id=ctx.channel.id,
         )
         await ctx.send(f"Reminder #{reminder_id} scheduled in {minutes} minute(s).")
+
+    @bot.command(name="timezone")
+    async def cmd_timezone(ctx: commands.Context, *, tz: str | None = None) -> None:
+        user_id = _user_id_for(ctx.author)
+        if not tz:
+            current = assistant.db.get_user_timezone(user_id)
+            await ctx.send(
+                f"Your timezone: {current}. Set with !timezone <IANA name> "
+                f"(e.g. Europe/London, Asia/Colombo, America/New_York)."
+            )
+            return
+        tz = tz.strip().strip('"').strip("'")
+        try:
+            assistant.db.set_user_timezone(user_id, tz)
+            await ctx.send(f"Timezone set to {tz}.")
+        except Exception as exc:  # noqa: BLE001
+            await ctx.send(f"Unknown timezone {tz!r}: {exc}")
 
     @bot.command(name="list")
     async def cmd_list(ctx: commands.Context) -> None:

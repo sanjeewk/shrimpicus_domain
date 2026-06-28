@@ -56,5 +56,21 @@
       <span class="group-members__item">Discord: {{ user.discord_user_id or 'Not linked' }}</span>
     </div>
   </article>
+
+  <article class="panel">
+    <div class="panel__header">
+      <h2 class="panel__title">Timezone</h2>
+      <p class="panel__text">Used to interpret times for recurring reminders (daily / weekly / monthly). Defaults to UTC.</p>
+    </div>
+    <form method="post" action="{{ url_for('set_timezone') }}">
+      <label for="timezone" class="panel__text">Your timezone:</label>
+      <select id="timezone" name="timezone" class="timezone-select" style="margin: 0 8px;">
+        {% for tz_label, tz_value in timezone_options %}
+          <option value="{{ tz_value }}" {% if user.timezone == tz_value %}selected{% endif %}>{{ tz_label }}</option>
+        {% endfor %}
+      </select>
+      <button class="primary-btn" type="submit">Save Timezone</button>
+    </form>
+  </article>
 </section>
 {% endblock %}

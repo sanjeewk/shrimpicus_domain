@@ -88,8 +88,114 @@ class AssistantService:
             return "No reminders yet."
         lines = []
         for r in reminders:
-            lines.append(f"#{r.id} [{r.status}] {r.due_at} - {r.content}")
+            tag = ""
+            if r.recur_kind:
+                from shrimpicus import recur
+                tag = f"[recurring {recur.describe_schedule(kind=r.recur_kind, time_hhmm=r.recur_time or '', dow=r.recur_dow, dom=r.recur_dom)}] "
+            lines.append(f"#{r.id} [{r.status}] {tag}{r.due_at} - {r.content}")
         return "\n".join(lines)
+
+    def list_recurring_reminders_text(self, user_id: int) -> str:
+        reminders = self.db.list_recurring_reminders(user_id)
+        if not reminders:
+            return "No recurring reminders yet. Use add_recurring_reminder to create one."
+        from shrimpicus import recur
+        tz = self.db.get_user_timezone(user_id)
+        lines = []
+        for r in reminders:
+            schedule = recur.describe_schedule(
+                kind=r.recur_kind or "daily",
+                time_hhmm=r.recur_time or "",
+                dow=r.recur_dow,
+                dom=r.recur_dom,
+            )
+            next_local = ""
+            try:
+                due_dt = dt_parser.parse(r.due_at)
+                if due_dt.tzinfo is None:
+                    due_dt = due_dt.replace(tzinfo=timezone.utc)
+                next_local = recur.format_local(due_dt, tz)
+            except Exception:
+                next_local = r.due_at
+            lines.append(f"#{r.id} [{schedule}] next: {next_local} - {r.content}")
+        return "\n".join(lines)
+
+    def add_recurring_reminder(
+        self,
+        user_id: int,
+        kind: str,
+        time_str: str,
+        content: str,
+        weekday: str | None = None,
+        dom: int | None = None,
+        delivery_chat_id: int | None = None,
+    ) -> str:
+        from shrimpicus import recur
+
+        kind = (kind or "").strip().lower()
+        if kind not in recur.VALID_KINDS:
+            return f"kind must be one of {recur.VALID_KINDS}, got {kind!r}."
+        content = (content or "").strip()
+        if not content:
+            return "Cannot add an empty reminder."
+
+        dow: int | None = None
+        dom_int: int | None = None
+        if kind == "weekly":
+            if not weekday:
+                return "weekly reminders need a weekday (mon/tue/wed/thu/fri/sat/sun)."
+            dow = recur.parse_weekday(weekday)
+        elif kind == "monthly":
+            if dom is None:
+                return "monthly reminders need a day-of-month (1-31)."
+            try:
+                dom_int = int(dom)
+            except (TypeError, ValueError):
+                return "monthly day-of-month must be an integer 1-31."
+            if not (1 <= dom_int <= 31):
+                return "monthly day-of-month must be between 1 and 31."
+
+        # Validate time format before touching the DB.
+        try:
+            recur.parse_time(time_str)
+        except ValueError as exc:
+            return f"Invalid time format: {exc}"
+
+        tz = self.db.get_user_timezone(user_id)
+        try:
+            first_utc = recur.next_occurrence(
+                kind=kind,
+                after_utc=datetime.now(timezone.utc),
+                user_tz=tz,
+                time_hhmm=time_str,
+                dow=dow,
+                dom=dom_int,
+            )
+        except ValueError as exc:
+            return f"Could not schedule recurring reminder: {exc}"
+
+        rid = self.db.add_recurring_reminder(
+            user_id=user_id,
+            chat_id=delivery_chat_id if delivery_chat_id is not None else user_id,
+            content=content,
+            recur_kind=kind,
+            recur_time=time_str,
+            first_due_utc_iso=first_utc.isoformat(),
+            recur_dow=dow,
+            recur_dom=dom_int,
+            poll_required=True,
+        )
+        schedule = recur.describe_schedule(kind=kind, time_hhmm=time_str, dow=dow, dom=dom_int)
+        return (
+            f"Recurring reminder #{rid} added ({schedule}). "
+            f"Next fire: {recur.format_local(first_utc, tz)} ({tz})."
+        )
+
+    def delete_reminder(self, reminder_id: int, user_id: int) -> str:
+        ok = self.db.delete_reminder(reminder_id, user_id)
+        if ok:
+            return f"Deleted reminder #{reminder_id}."
+        return f"No reminder #{reminder_id} on your account."
 
     async def add_todo(
         self,
