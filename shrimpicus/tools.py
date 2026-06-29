@@ -181,10 +181,10 @@ TOOLS: tuple[Tool, ...] = (
     Tool(
         name="list_todos",
         description=(
-            "List the user's current open (not done) todos. Returns a "
-            "1-indexed position list grouped by category — NO database ids "
-            "are exposed. Use the position number (1, 2, 3...) as the "
-            "'position' argument in complete_todo / set_todo_status."
+            "List the user's current open (not done) todos as a flat "
+            "1-indexed list — NO database ids and NO category groupings are "
+            "exposed. Use the position number (1, 2, 3...) as the 'position' "
+            "argument in complete_todo / set_todo_status."
         ),
         parameters={"type": "object", "properties": {}},
         handler=_list_todos,
