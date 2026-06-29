@@ -246,6 +246,43 @@ class AssistantService:
                 lines.extend(grouped[cat])
         return "\n".join(lines)
 
+    def list_todos_text_indexed(self, user_id: int) -> str:
+        """LLM-facing todo list: 1-indexed positions, no DB ids exposed.
+
+        Ordering must match ``todo_id_at_position`` (both call list_todos with
+        include_done=False, ordered by id DESC).
+        """
+        rows = self.db.list_todos(user_id, include_done=False)
+        if not rows:
+            return "No open todos."
+        grouped: dict[str, list[tuple[int, str]]] = {c: [] for c in TODO_CATEGORIES}
+        for idx, row in enumerate(rows, start=1):
+            cat = row["category"] if "category" in row.keys() else "General"
+            if cat not in grouped:
+                grouped[cat] = []
+            status = row["status"] if "status" in row.keys() else "to_do"
+            marker = {"to_do": "[ ]", "doing": "[~]", "done": "[x]"}.get(status, "[ ]")
+            grouped[cat].append((idx, f"{marker} {row['task']}"))
+        lines: list[str] = []
+        for cat in TODO_CATEGORIES:
+            entries = grouped.get(cat)
+            if not entries:
+                continue
+            lines.append(f"**{cat}**")
+            for idx, text in entries:
+                lines.append(f"{idx}. {text}")
+        return "\n".join(lines)
+
+    def todo_id_at_position(self, user_id: int, position: int) -> int | None:
+        """Resolve a 1-indexed position (as shown by list_todos_text_indexed)
+        back to the DB id of that todo. Returns None if out of range."""
+        if position < 1:
+            return None
+        rows = self.db.list_todos(user_id, include_done=False)
+        if position > len(rows):
+            return None
+        return int(rows[position - 1]["id"])
+
     def mark_todo_done(self, todo_id: int, user_id: int, delivery_chat_id: int | None = None) -> str:
         if not self.db.set_todo_done(todo_id, True, user_id=user_id):
             return f"No todo #{todo_id} found for your account."

@@ -53,23 +53,36 @@ async def _add_todo(svc: "AssistantService", user_id: int, args: dict[str, Any],
 
 
 async def _list_todos(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
-    return svc.list_todos_text(user_id)
+    return svc.list_todos_text_indexed(user_id)
 
 
 async def _complete_todo(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
-    return svc.mark_todo_done(int(args["todo_id"]), user_id, delivery_chat_id=delivery_chat_id)
+    try:
+        position = int(args["position"])
+    except (KeyError, TypeError, ValueError):
+        return "position must be an integer (1-indexed, as shown by list_todos)."
+    todo_id = svc.todo_id_at_position(user_id, position)
+    if todo_id is None:
+        return f"No todo at position {position}. Call list_todos to see current positions."
+    return svc.mark_todo_done(todo_id, user_id, delivery_chat_id=delivery_chat_id)
 
 
 async def _set_todo_status(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
     status = str(args["status"]).strip().lower()
-    todo_id = int(args["todo_id"])
+    try:
+        position = int(args["position"])
+    except (KeyError, TypeError, ValueError):
+        return "position must be an integer (1-indexed, as shown by list_todos)."
+    todo_id = svc.todo_id_at_position(user_id, position)
+    if todo_id is None:
+        return f"No todo at position {position}. Call list_todos to see current positions."
     try:
         updated = svc.db.set_todo_status(todo_id, status, user_id=user_id)
     except ValueError as exc:
         return str(exc)
     if not updated:
-        return f"No todo #{todo_id} found for your account."
-    return f"Todo #{todo_id} moved to {status}."
+        return f"No todo at position {position}."
+    return f"Todo at position {position} moved to {status}."
 
 
 async def _add_reminder(svc: "AssistantService", user_id: int, args: dict[str, Any], delivery_chat_id: int | None) -> str:
@@ -167,30 +180,44 @@ TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         name="list_todos",
-        description="List the user's current open (not done) todos, grouped by category.",
+        description=(
+            "List the user's current open (not done) todos. Returns a "
+            "1-indexed position list grouped by category — NO database ids "
+            "are exposed. Use the position number (1, 2, 3...) as the "
+            "'position' argument in complete_todo / set_todo_status."
+        ),
         parameters={"type": "object", "properties": {}},
         handler=_list_todos,
     ),
     Tool(
         name="complete_todo",
-        description="Mark a todo as done by its id number.",
+        description=(
+            "Mark a todo as done by its 1-indexed position (NOT a database "
+            "id). The position comes from list_todos. Positions reflect the "
+            "current open-todo list; if it has changed since you listed, "
+            "re-list first."
+        ),
         parameters={
             "type": "object",
-            "properties": {"todo_id": {"type": "integer"}},
-            "required": ["todo_id"],
+            "properties": {"position": {"type": "integer", "minimum": 1}},
+            "required": ["position"],
         },
         handler=_complete_todo,
     ),
     Tool(
         name="set_todo_status",
-        description="Move a todo on the kanban board. Status is one of to_do, doing, done.",
+        description=(
+            "Move a todo on the kanban board by its 1-indexed position (NOT "
+            "a database id). The position comes from list_todos. Status is "
+            "one of to_do, doing, done."
+        ),
         parameters={
             "type": "object",
             "properties": {
-                "todo_id": {"type": "integer"},
+                "position": {"type": "integer", "minimum": 1},
                 "status": {"type": "string", "enum": ["to_do", "doing", "done"]},
             },
-            "required": ["todo_id", "status"],
+            "required": ["position", "status"],
         },
         handler=_set_todo_status,
     ),
