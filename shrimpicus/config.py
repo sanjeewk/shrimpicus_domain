@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     check_interval_seconds: int = 30
     default_snooze_minutes: int = 30
 
+    backlog_enabled: bool = True
+    backlog_max_messages: int = 50
+
     notion_token: str = ""
     notion_database_id: str = ""
     notion_title_property: str = "Name"

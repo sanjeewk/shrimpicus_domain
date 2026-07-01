@@ -19,6 +19,8 @@ def build_bot(
     assistant: AssistantService,
     assistant_channels: list[str] | None = None,
     transcriber: Transcriber | None = None,
+    backlog_enabled: bool = True,
+    backlog_max_messages: int = 50,
 ) -> commands.Bot:
     assistant_channel_names = {c.lower() for c in (assistant_channels or [])}
 
@@ -44,6 +46,86 @@ def build_bot(
         if not scheduler.scheduler.running:
             scheduler.start()
         print(f"Shrimpicus logged in as {bot.user}")
+        if backlog_enabled:
+            bot.loop.create_task(_replay_backlog())
+
+    def _is_watchable(message: discord.Message) -> bool:
+        """Same routing predicate as on_message free-text path."""
+        if message.author.bot:
+            return False
+        if message.content.startswith(command_prefix):
+            return False
+        channel_name = (getattr(message.channel, "name", "") or "").lower()
+        in_assistant_channel = channel_name in assistant_channel_names
+        mentioned = bool(bot.user and bot.user in message.mentions)
+        is_dm = message.guild is None
+        in_server_channel = message.guild is not None
+        return bool(is_dm or in_server_channel or mentioned or in_assistant_channel)
+
+    async def _process_free_text(message: discord.Message) -> None:
+        transcript = await _maybe_transcribe(message)
+        text = (transcript or message.content or "").strip()
+        if not text:
+            return
+        if transcript:
+            await message.channel.send(f"(transcribed) {transcript}")
+        user_id = _user_id_for(message.author)
+        reply = await assistant.free_text(user_id, text, delivery_chat_id=message.channel.id)
+        await message.channel.send(reply)
+
+    async def _replay_backlog() -> None:
+        """On startup, read messages missed while offline and process sequentially."""
+        try:
+            await bot.wait_until_ready()
+            channels_to_scan: dict[int, discord.abc.Messageable] = {}
+
+            for guild in bot.guilds:
+                for ch in guild.text_channels:
+                    if (getattr(ch, "name", "") or "").lower() in assistant_channel_names:
+                        channels_to_scan[ch.id] = ch
+
+            for channel_id in assistant.db.list_bookmarked_channels():
+                if channel_id in channels_to_scan:
+                    continue
+                ch = bot.get_channel(channel_id)
+                if ch is not None:
+                    channels_to_scan[channel_id] = ch
+
+            for channel_id, channel in channels_to_scan.items():
+                last_id = assistant.db.get_message_bookmark(channel_id)
+                try:
+                    history = []
+                    after = discord.Object(last_id) if last_id else None
+                    async for msg in channel.history(
+                        limit=backlog_max_messages, after=after, oldest_first=True
+                    ):
+                        history.append(msg)
+                except discord.Forbidden:
+                    logger.warning("No read access to channel %s during backlog", channel_id)
+                    continue
+                except Exception:
+                    logger.exception("Failed reading history for channel %s", channel_id)
+                    continue
+
+                backlog = [m for m in history if _is_watchable(m)]
+                if not backlog:
+                    if history:
+                        assistant.db.set_message_bookmark(channel_id, history[-1].id)
+                    continue
+
+                try:
+                    await channel.send(f"📬 Catching up on {len(backlog)} message(s)...")
+                except Exception:
+                    logger.exception("Could not post backlog notice to channel %s", channel_id)
+
+                for msg in backlog:
+                    try:
+                        await _process_free_text(msg)
+                    except Exception:
+                        logger.exception("Backlog processing failed for msg %s", msg.id)
+                    assistant.db.set_message_bookmark(channel_id, msg.id)
+        except Exception:
+            logger.exception("Backlog replay failed")
 
     @bot.command(name="start")
     async def cmd_start(ctx: commands.Context) -> None:
@@ -313,27 +395,14 @@ def build_bot(
             return
         await bot.process_commands(message)
         if message.content.startswith(command_prefix):
+            assistant.db.set_message_bookmark(message.channel.id, message.id)
             return
 
-        channel_name = (getattr(message.channel, "name", "") or "").lower()
-        in_assistant_channel = channel_name in assistant_channel_names
-        mentioned = bool(bot.user and bot.user in message.mentions)
-        is_dm = message.guild is None
-
-        in_server_channel = message.guild is not None
-
-        if not (is_dm or in_server_channel or mentioned or in_assistant_channel):
+        if not _is_watchable(message):
+            assistant.db.set_message_bookmark(message.channel.id, message.id)
             return
 
-        transcript = await _maybe_transcribe(message)
-        text = (transcript or message.content or "").strip()
-        if not text:
-            return
-
-        if transcript:
-            await message.channel.send(f"(transcribed) {transcript}")
-        user_id = _user_id_for(message.author)
-        reply = await assistant.free_text(user_id, text, delivery_chat_id=message.channel.id)
-        await message.channel.send(reply)
+        await _process_free_text(message)
+        assistant.db.set_message_bookmark(message.channel.id, message.id)
 
     return bot

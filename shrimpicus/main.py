@@ -52,6 +52,8 @@ async def run() -> None:
         assistant,
         assistant_channels=settings.assistant_channels,
         transcriber=transcriber,
+        backlog_enabled=settings.backlog_enabled,
+        backlog_max_messages=settings.backlog_max_messages,
     )
     scheduler = ShrimpScheduler(settings, db, bot)
     bot.shrimp_scheduler = scheduler  # type: ignore[attr-defined]

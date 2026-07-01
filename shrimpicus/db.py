@@ -245,6 +245,12 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user
               ON discord_link_codes(user_id);
+
+            CREATE TABLE IF NOT EXISTS message_bookmarks (
+              channel_id INTEGER PRIMARY KEY,
+              last_message_id INTEGER NOT NULL,
+              updated_at TEXT NOT NULL
+            );
             """
         )
 
@@ -466,6 +472,14 @@ class Database:
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_discord_link_codes_user
               ON discord_link_codes(user_id);
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS message_bookmarks (
+              channel_id BIGINT PRIMARY KEY,
+              last_message_id BIGINT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
         """)
 
         cur.close()
@@ -1303,3 +1317,38 @@ class Database:
             "todos_done_today": todos_done_today,
             "habits_logged_today": habits_logged_today,
         }
+
+    # --- message backlog bookmarks ------------------------------------------ #
+    def get_message_bookmark(self, channel_id: int) -> int | None:
+        cur = self._get_cursor()
+        query = self._param(
+            "SELECT last_message_id FROM message_bookmarks WHERE channel_id = ? LIMIT 1"
+        )
+        row = cur.execute(query, (channel_id,)).fetchone()
+        if self.is_postgres:
+            cur.close()
+        if row is None:
+            return None
+        return int(row["last_message_id"])
+
+    def set_message_bookmark(self, channel_id: int, message_id: int) -> None:
+        cur = self._get_cursor()
+        query = self._param("""
+            INSERT INTO message_bookmarks(channel_id, last_message_id, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(channel_id) DO UPDATE SET
+              last_message_id = excluded.last_message_id,
+              updated_at = excluded.updated_at
+        """)
+        cur.execute(query, (channel_id, message_id, utc_now_iso()))
+        self.conn.commit()
+        if self.is_postgres:
+            cur.close()
+
+    def list_bookmarked_channels(self) -> list[int]:
+        cur = self._get_cursor()
+        query = self._param("SELECT channel_id FROM message_bookmarks")
+        rows = cur.execute(query).fetchall()
+        if self.is_postgres:
+            cur.close()
+        return [int(r["channel_id"]) for r in rows]
